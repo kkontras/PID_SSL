@@ -133,13 +133,29 @@ To make this easier to cite in the text, Table 1 summarizes the holdout CCA1 cor
 | `R12` | 0.90 | 0.126 | 0.140 | 0.025 | Weaker than low-noise but still structured; pair `(1,2)` remains informative. |
 | `R123` | 0.90 | 0.115 | 0.160 | 0.240 | Shared structure persists across pairs but is attenuated by noise. |
 
-### 3.7 Figure G: PCA Intuition Scatter Plots (Secondary Diagnostic)
+### 3.7 Figure G: CCA Summary Under Targeted Boosting Mechanisms
+
+![CCA boosting mechanisms summary](test_outputs/pid_sar3/cca_boosting_mechanisms_summary.png)
+
+The previous CCA table establishes that holdout CCA is a better geometric summary than PCA. A natural next question is whether this summary responds correctly when we intentionally amplify specific atoms using the gain controls. To answer that, the figure above and the table below compare baseline generation against targeted boosts of `U1`, `R12`, `R123`, and `S12->3`, using fixed `sigma = 0.45`, `rho = 0.5`, and `hop = 2` to reduce nuisance variability. The summary statistic is atom-specific: mean pairwise CCA for `U1`, `R123`, and `S12->3`, and `CCA(1,2)` for `R12` (its most relevant pair).
+
+| Scenario | U1 summary CCA | R12 summary CCA | R123 summary CCA | S12->3 summary CCA | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| baseline | 0.022 | 0.294 | 0.380 | 0.049 | Baseline pairwise CCA is low for `U1` and `S12->3`, high for redundancy atoms. |
+| boost `U1` | 0.035 | 0.294 | 0.380 | 0.049 | Boosting `U1` modestly increases `U1` CCA summary without affecting redundancy atoms. |
+| boost `R12` | 0.022 | 0.436 | 0.380 | 0.049 | Boosting `R12` strongly increases `CCA(1,2)` for `R12`, as expected. |
+| boost `R123` | 0.022 | 0.294 | 0.455 | 0.049 | Boosting `R123` increases pairwise CCA across all pairs, reflected in the larger mean. |
+| boost `S12->3` | 0.022 | 0.294 | 0.380 | 0.057 | Pairwise CCA changes only slightly for synergy; this is expected because pairwise linear dependence is not the primary signature of directional synergy. |
+
+This table is useful because it separates two ideas that are easy to conflate. First, the gain controls do work as intended and can selectively amplify targeted atoms. Second, the *right metric must be used for the right atom family*: pairwise CCA is highly responsive for redundancy atoms, only weakly responsive for unique atoms, and not a primary diagnostic for directional synergy (for which the synergy-proxy $\Delta$ is more appropriate).
+
+### 3.8 Figure H: PCA Intuition Scatter Plots (Secondary Diagnostic)
 
 ![U/R PCA intuition scatter plots](test_outputs/pid_sar3/ur_intuition_scatter_examples.png)
 
 These plots visualize the first principal-component scores $z_k=\mathrm{PC1}(X_k)$ and scatter paired scores $(z_1,z_2)$ for the same samples. In this document they are intentionally secondary to the CCA figures, because PCA is fit independently per view and therefore does not explicitly align shared cross-view directions. The useful reading strategy is to compare the *shape* of the cloud and the *magnitude* of the panel correlation, not the sign of the slope. In the currently generated figure (same code path and seeds as the test), the low-noise row (`sigma = 0.15`) shows a near-zero association for `U1` (approximately $|r| \approx 0.016$), while `R12` and `R123` show visibly stronger alignment (approximately $|r| \approx 0.218$ and $|r| \approx 0.274$, respectively). In the high-noise row (`sigma = 0.9`), the `R12` panel still retains a visible dependence signal (approximately $|r| \approx 0.137$), whereas `U1` remains near zero (approximately $|r| \approx 0.003$) and `R123` may collapse toward the noise floor in this particular `(x1,x2)` PCA projection (approximately $|r| \approx 0.007$). This is a projection limitation, not evidence that the `R123` atom disappeared. Because PCA signs are arbitrary, slope direction may flip across runs; the presence and magnitude of alignment are the meaningful features.
 
-### 3.8 Figure H: `R123` PCA Companion Across All View Pairs
+### 3.9 Figure I: `R123` PCA Companion Across All View Pairs
 
 ![R123 PCA all pairs](test_outputs/pid_sar3/r123_pca_all_pairs.png)
 
@@ -224,7 +240,7 @@ np.savez_compressed("data/pid_sar3_ur_train.npz", **batch)
 
 ### 4.5 Where the Diagnostics Are Implemented
 
-The main U/R plots are produced by `test_plot_atom_gain_controls_ur()`, `test_plot_pid_metadata_distributions()`, `test_plot_pid_dependence_distributions_boxplots()`, `test_plot_ur_compact_signature_grid_over_sigma()`, `test_plot_ur_hyperparameter_sweeps_compact()`, `test_plot_cca_all_pairs_ur()`, `test_plot_ur_intuition_scatter_examples()`, and `test_plot_r123_pca_all_pairs()` in `tests/test_pid_sar3_dataset.py`. These functions are written as tests so they can serve both as regression checks and as reproducible figure-generation scripts.
+The main U/R plots are produced by `test_plot_atom_gain_controls_ur()`, `test_plot_pid_metadata_distributions()`, `test_plot_pid_dependence_distributions_boxplots()`, `test_plot_ur_compact_signature_grid_over_sigma()`, `test_plot_ur_hyperparameter_sweeps_compact()`, `test_plot_cca_all_pairs_ur()`, `test_plot_cca_boosting_mechanisms_summary()`, `test_plot_ur_intuition_scatter_examples()`, and `test_plot_r123_pca_all_pairs()` in `tests/test_pid_sar3_dataset.py`. These functions are written as tests so they can serve both as regression checks and as reproducible figure-generation scripts.
 
 ## 5. Commands to Reproduce the Dataset and Figures
 
@@ -237,6 +253,7 @@ from tests.test_pid_sar3_dataset import (
     test_plot_pid_metadata_distributions,
     test_plot_pid_dependence_distributions_boxplots,
     test_plot_cca_all_pairs_ur,
+    test_plot_cca_boosting_mechanisms_summary,
     test_plot_r123_pca_all_pairs,
     test_plot_ur_compact_signature_grid_over_sigma,
     test_plot_ur_hyperparameter_sweeps_compact,
@@ -247,6 +264,7 @@ test_plot_atom_gain_controls_ur()
 test_plot_pid_metadata_distributions()
 test_plot_pid_dependence_distributions_boxplots()
 test_plot_cca_all_pairs_ur()
+test_plot_cca_boosting_mechanisms_summary()
 test_plot_r123_pca_all_pairs()
 test_plot_ur_compact_signature_grid_over_sigma()
 test_plot_ur_hyperparameter_sweeps_compact()
@@ -255,7 +273,7 @@ print("Saved plots under test_outputs/pid_sar3")
 PY
 ```
 
-This command generates `test_outputs/pid_sar3/atom_gain_controls_ur.png`, `test_outputs/pid_sar3/pid_metadata_distributions.png`, `test_outputs/pid_sar3/pid_dependence_distributions_boxplots.png`, `test_outputs/pid_sar3/cca_all_pairs_ur_sigma_0p15.png`, `test_outputs/pid_sar3/cca_all_pairs_ur_sigma_0p9.png`, `test_outputs/pid_sar3/r123_pca_all_pairs.png`, `test_outputs/pid_sar3/ur_compact_signature_grid_over_sigma.png`, `test_outputs/pid_sar3/ur_hyperparameter_sweeps_compact.png`, and `test_outputs/pid_sar3/ur_intuition_scatter_examples.png`.
+This command generates `test_outputs/pid_sar3/atom_gain_controls_ur.png`, `test_outputs/pid_sar3/pid_metadata_distributions.png`, `test_outputs/pid_sar3/pid_dependence_distributions_boxplots.png`, `test_outputs/pid_sar3/cca_all_pairs_ur_sigma_0p15.png`, `test_outputs/pid_sar3/cca_all_pairs_ur_sigma_0p9.png`, `test_outputs/pid_sar3/cca_boosting_mechanisms_summary.png`, `test_outputs/pid_sar3/cca_boosting_mechanisms_summary.csv`, `test_outputs/pid_sar3/r123_pca_all_pairs.png`, `test_outputs/pid_sar3/ur_compact_signature_grid_over_sigma.png`, `test_outputs/pid_sar3/ur_hyperparameter_sweeps_compact.png`, and `test_outputs/pid_sar3/ur_intuition_scatter_examples.png`.
 
 ### 5.2 Generate and Save a Balanced U/R Dataset (`.npz`)
 

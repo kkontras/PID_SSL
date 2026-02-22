@@ -560,6 +560,106 @@ def test_plot_cca_all_pairs_ur():
     assert np.mean(list(low["R123"].values())) > low["U1"]["1-2"]
 
 
+def test_plot_cca_boosting_mechanisms_summary():
+    """
+    Compare holdout CCA under targeted per-pid boosts for U1, R12, R123, S12->3.
+    This is intended for a compact summary table/heatmap in the markdown document.
+    """
+    out_dir = _ensure_plot_dir()
+    scenarios = [
+        ("baseline", None),
+        ("boost_U1", {0: 2.0}),
+        ("boost_R12", {3: 2.0}),
+        ("boost_R123", {6: 2.0}),
+        ("boost_S12->3", {7: 2.0}),
+    ]
+    probe_pids = [(0, "U1"), (3, "R12"), (6, "R123"), (7, "S12->3")]
+    pair_defs = [("x1", "x2", "1-2"), ("x1", "x3", "1-3"), ("x2", "x3", "2-3")]
+
+    # Fix rho/hop to reduce nuisance variance and isolate the gain effect.
+    sigma = 0.45
+    rows = []
+    metric_matrix = []
+
+    for label, overrides in scenarios:
+        cfg = PIDDatasetConfig(
+            d=32,
+            m=8,
+            sigma=sigma,
+            rho_choices=(0.5,),
+            hop_choices=(2,),
+            seed=1001,
+            deleakage_fit_samples=1024,
+            pid_gain_overrides=overrides,
+        )
+        gen = PIDSar3DatasetGenerator(cfg)
+
+        for pid_id, pid_label in probe_pids:
+            batch = _generate_fixed_pid(gen, pid_id=pid_id, n=700)
+            ccas = {}
+            for a, b, p in pair_defs:
+                _, _, cc = _top_cca_scores_holdout(batch[a], batch[b], ridge=1e-3)
+                ccas[p] = cc
+
+            if pid_id == 0:
+                metric_name = "mean pairwise CCA (U1)"
+                score = float(np.mean([ccas["1-2"], ccas["1-3"], ccas["2-3"]]))
+            elif pid_id == 3:
+                metric_name = "CCA(1,2) for R12"
+                score = float(ccas["1-2"])
+            elif pid_id == 6:
+                metric_name = "mean pairwise CCA (R123)"
+                score = float(np.mean([ccas["1-2"], ccas["1-3"], ccas["2-3"]]))
+            else:
+                metric_name = "mean pairwise CCA (S12->3)"
+                score = float(np.mean([ccas["1-2"], ccas["1-3"], ccas["2-3"]]))
+
+            rows.append(
+                {
+                    "scenario": label,
+                    "pid": pid_label,
+                    "cca_12": float(ccas["1-2"]),
+                    "cca_13": float(ccas["1-3"]),
+                    "cca_23": float(ccas["2-3"]),
+                    "summary_metric_name": metric_name,
+                    "summary_metric": score,
+                }
+            )
+            metric_matrix.append(score)
+
+    # Heatmap summary for the four probe atoms across scenarios.
+    metric_mat = np.asarray(metric_matrix, dtype=np.float32).reshape(len(scenarios), len(probe_pids))
+    fig, ax = plt.subplots(figsize=(9.0, 4.8))
+    im = ax.imshow(metric_mat, aspect="auto", cmap="cividis")
+    ax.set_xticks(range(len(probe_pids)))
+    ax.set_xticklabels([label for _, label in probe_pids])
+    ax.set_yticks(range(len(scenarios)))
+    ax.set_yticklabels([label for label, _ in scenarios])
+    ax.set_title("Holdout CCA summary under targeted pid boosts (sigma=0.45, rho=0.5, hop=2)")
+    for i in range(metric_mat.shape[0]):
+        for j in range(metric_mat.shape[1]):
+            ax.text(j, i, f"{metric_mat[i, j]:.2f}", ha="center", va="center", color="white", fontsize=8)
+    fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
+    _savefig(out_dir / "cca_boosting_mechanisms_summary.png")
+
+    # Save a machine-readable CSV for easy MD table creation.
+    csv_path = out_dir / "cca_boosting_mechanisms_summary.csv"
+    with csv_path.open("w", encoding="utf-8") as f:
+        f.write("scenario,pid,cca_12,cca_13,cca_23,summary_metric_name,summary_metric\n")
+        for r in rows:
+            f.write(
+                f"{r['scenario']},{r['pid']},{r['cca_12']:.6f},{r['cca_13']:.6f},{r['cca_23']:.6f},"
+                f"{r['summary_metric_name']},{r['summary_metric']:.6f}\n"
+            )
+
+    # Targeted boosts should primarily affect their own atom summaries.
+    baseline = metric_mat[0]
+    assert metric_mat[1, 0] > baseline[0]  # boost_U1 impacts U1 summary
+    assert metric_mat[2, 1] > baseline[1]  # boost_R12 impacts R12 summary
+    assert metric_mat[3, 2] > baseline[2]  # boost_R123 impacts R123 summary
+    assert np.all(np.isfinite(metric_mat))
+
+
 def test_plot_atom_gain_controls_ur():
     """
     Demonstrate controllable atom-family scaling.

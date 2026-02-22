@@ -111,6 +111,22 @@ def _savefig(path: Path) -> None:
     plt.close()
 
 
+def _pc1_scores(X: np.ndarray) -> np.ndarray:
+    Xc = X - np.mean(X, axis=0, keepdims=True)
+    _, _, vt = np.linalg.svd(Xc, full_matrices=False)
+    return Xc @ vt[0]
+
+
+def _safe_corr(a: np.ndarray, b: np.ndarray) -> float:
+    if np.std(a) < 1e-8 or np.std(b) < 1e-8:
+        return 0.0
+    return float(np.corrcoef(a, b)[0, 1])
+
+
+def _mean_view_norm(batch: Dict[str, np.ndarray], key: str) -> float:
+    return float(np.mean(np.linalg.norm(batch[key], axis=1)))
+
+
 def test_dataset_shapes_and_metadata():
     gen = _make_generator(seed=7)
     batch = gen.generate(64)
@@ -246,10 +262,159 @@ def test_plot_synergy_delta_vs_hop():
     assert np.all(np.isfinite(wrong_direction_curve))
 
 
+def test_plot_ur_compact_signature_grid_over_sigma():
+    out_dir = _ensure_plot_dir()
+    pid_ids = [0, 1, 2, 3, 4, 5, 6]
+    pid_labels = ["U1", "U2", "U3", "R12", "R13", "R23", "R123"]
+    pair_keys = [("x1", "x2"), ("x1", "x3"), ("x2", "x3")]
+    pair_labels = ["D(1,2)", "D(1,3)", "D(2,3)"]
+    sigma_values = [0.15, 0.45, 0.9]
+
+    panel_scores: List[np.ndarray] = []
+    for col, sigma in enumerate(sigma_values):
+        gen = _make_generator(seed=101 + col, sigma=sigma)
+        scores = np.zeros((len(pid_ids), len(pair_keys)), dtype=np.float32)
+        for i, pid_id in enumerate(pid_ids):
+            batch = _generate_fixed_pid(gen, pid_id=pid_id, n=700)
+            for j, (a, b) in enumerate(pair_keys):
+                scores[i, j] = _dependence_proxy(batch[a], batch[b])
+        panel_scores.append(scores)
+
+    vmin = min(float(np.min(s)) for s in panel_scores)
+    vmax = max(float(np.max(s)) for s in panel_scores)
+
+    fig, axes = plt.subplots(1, 3, figsize=(12.5, 4.6), sharey=True)
+    im = None
+    for ax, sigma, scores in zip(axes, sigma_values, panel_scores):
+        im = ax.imshow(scores, aspect="auto", cmap="magma", vmin=vmin, vmax=vmax)
+        ax.set_title(f"sigma={sigma}")
+        ax.set_xticks(range(3))
+        ax.set_xticklabels(pair_labels, rotation=20)
+        ax.set_yticks(range(len(pid_labels)))
+        ax.set_yticklabels(pid_labels)
+        for r in range(scores.shape[0]):
+            c = int(np.argmax(scores[r]))
+            ax.text(c, r, "●", ha="center", va="center", color="white", fontsize=8)
+
+    fig.suptitle("U/R-only signatures across noise: unique stays weak, redundancy activates matching pairs")
+    if im is not None:
+        fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.02, pad=0.02)
+    _savefig(out_dir / "ur_compact_signature_grid_over_sigma.png")
+
+    low_sigma_scores = panel_scores[0]
+    assert low_sigma_scores[3, 0] > low_sigma_scores[3, 1] and low_sigma_scores[3, 0] > low_sigma_scores[3, 2]
+    assert low_sigma_scores[4, 1] > low_sigma_scores[4, 0] and low_sigma_scores[4, 1] > low_sigma_scores[4, 2]
+    assert low_sigma_scores[5, 2] > low_sigma_scores[5, 0] and low_sigma_scores[5, 2] > low_sigma_scores[5, 1]
+    assert float(np.max(low_sigma_scores[:3])) < float(np.max(low_sigma_scores[3:]))
+
+
+def test_plot_ur_hyperparameter_sweeps_compact():
+    out_dir = _ensure_plot_dir()
+    rho_values = [0.2, 0.5, 0.8]
+    sigma_values = [0.15, 0.45, 0.9]
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.3))
+
+    for sigma in sigma_values:
+        gen = _make_generator(seed=200 + int(100 * sigma), sigma=sigma)
+        curve = []
+        for rho in rho_values:
+            old_choices = gen.cfg.rho_choices
+            gen.cfg.rho_choices = (rho,)
+            batch = _generate_fixed_pid(gen, pid_id=3, n=700)
+            gen.cfg.rho_choices = old_choices
+            curve.append(_dependence_proxy(batch["x1"], batch["x2"]))
+        axes[0].plot(rho_values, curve, marker="o", label=f"sigma={sigma}")
+
+    axes[0].set_title("R12 dependence vs rho")
+    axes[0].set_xlabel("rho")
+    axes[0].set_ylabel("D(x1, x2)")
+    axes[0].grid(alpha=0.3)
+    axes[0].legend(fontsize=8)
+
+    alpha_ranges = [(0.4, 0.6), (0.8, 1.2), (1.4, 1.8)]
+    xlabels = ["0.5", "1.0", "1.6"]
+    x = np.arange(len(alpha_ranges), dtype=float)
+
+    for sigma in sigma_values:
+        gen = _make_generator(seed=300 + int(100 * sigma), sigma=sigma)
+        u1_norms = []
+        r123_norms = []
+        old_alpha_min, old_alpha_max = gen.cfg.alpha_min, gen.cfg.alpha_max
+        for a_min, a_max in alpha_ranges:
+            gen.cfg.alpha_min, gen.cfg.alpha_max = a_min, a_max
+            b_u1 = _generate_fixed_pid(gen, pid_id=0, n=500)
+            b_r123 = _generate_fixed_pid(gen, pid_id=6, n=500)
+            u1_norms.append(_mean_view_norm(b_u1, "x1"))
+            r123_norms.append(_mean_view_norm(b_r123, "x1"))
+        gen.cfg.alpha_min, gen.cfg.alpha_max = old_alpha_min, old_alpha_max
+
+        axes[1].plot(x, u1_norms, marker="o", linestyle="-", label=f"U1 | sigma={sigma}")
+        axes[1].plot(x, r123_norms, marker="s", linestyle="--", label=f"R123 | sigma={sigma}")
+
+    axes[1].set_title("View norm vs alpha (and noise)")
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(xlabels)
+    axes[1].set_xlabel("alpha center")
+    axes[1].set_ylabel("mean ||x1||")
+    axes[1].grid(alpha=0.3)
+    axes[1].legend(fontsize=7, ncol=2)
+
+    _savefig(out_dir / "ur_hyperparameter_sweeps_compact.png")
+
+    gen_chk = _make_generator(seed=222, sigma=0.15)
+    chk = []
+    for rho in rho_values:
+        old_choices = gen_chk.cfg.rho_choices
+        gen_chk.cfg.rho_choices = (rho,)
+        batch = _generate_fixed_pid(gen_chk, pid_id=3, n=600)
+        gen_chk.cfg.rho_choices = old_choices
+        chk.append(_dependence_proxy(batch["x1"], batch["x2"]))
+    assert chk[0] < chk[-1]
+
+
+def test_plot_ur_intuition_scatter_examples():
+    out_dir = _ensure_plot_dir()
+    sigma_values = [0.15, 0.9]
+    cases = [(0, "U1"), (3, "R12"), (6, "R123")]
+
+    fig, axes = plt.subplots(2, 3, figsize=(11.2, 6.4))
+    corr_table = np.zeros((len(sigma_values), len(cases)), dtype=np.float32)
+
+    for r, sigma in enumerate(sigma_values):
+        gen = _make_generator(seed=400 + r, sigma=sigma)
+        for c, (pid_id, label) in enumerate(cases):
+            batch = _generate_fixed_pid(gen, pid_id=pid_id, n=450)
+            s1 = _pc1_scores(batch["x1"])
+            s2 = _pc1_scores(batch["x2"])
+            corr = _safe_corr(s1, s2)
+            corr_table[r, c] = corr
+
+            ax = axes[r, c]
+            ax.scatter(s1, s2, s=8, alpha=0.45, c=batch["alpha"], cmap="viridis")
+            ax.set_title(f"{label} | sigma={sigma}\nr={corr:.2f}")
+            ax.set_xlabel("PC1(x1)")
+            ax.set_ylabel("PC1(x2)")
+            ax.grid(alpha=0.2)
+            lim = np.percentile(np.abs(np.concatenate([s1, s2])), 98) + 1e-6
+            ax.set_xlim(-lim, lim)
+            ax.set_ylim(-lim, lim)
+
+    fig.suptitle("U/R intuition: pairwise structure emerges only for redundancy")
+    _savefig(out_dir / "ur_intuition_scatter_examples.png")
+
+    assert abs(float(corr_table[0, 1])) > abs(float(corr_table[0, 0]))
+    assert abs(float(corr_table[0, 2])) > abs(float(corr_table[0, 0]))
+    assert np.all(np.isfinite(corr_table))
+
+
 if __name__ == "__main__":
     # Convenience local runner without pytest.
     test_dataset_shapes_and_metadata()
     test_plot_pairwise_dependence_signatures()
     test_plot_redundancy_monotonicity_vs_rho()
     test_plot_synergy_delta_vs_hop()
+    test_plot_ur_compact_signature_grid_over_sigma()
+    test_plot_ur_hyperparameter_sweeps_compact()
+    test_plot_ur_intuition_scatter_examples()
     print(f"Saved plots to {PLOT_DIR.resolve()}")

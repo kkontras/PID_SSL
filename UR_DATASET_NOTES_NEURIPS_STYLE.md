@@ -133,6 +133,21 @@ Given two view matrices `X_A` and `X_B` (rows are samples), define $D(X_A, X_B)=
 
 where each `R^2` is computed using ridge regression on a train/test split.
 
+Intuition for `D(1,2)`:
+
+- `D(1,2)` answers: "How much predictable structure is shared between view 1 and view 2?"
+- If `x1` helps linearly predict `x2` (and vice versa), then `D(1,2)` is high.
+- If view 1 and view 2 mostly contain unrelated signal/noise, then `D(1,2)` is low.
+- In this dataset:
+  - `U1` should have low `D(1,2)` because only `x1` contains signal and `x2` is mostly noise,
+  - `R12` should have high `D(1,2)` because both views share overlapping latent structure,
+  - `R123` should also have elevated `D(1,2)` because views 1 and 2 both inherit the shared triple-redundant latent.
+
+Paper-style interpretation:
+
+- `D(1,2)` is not a causal quantity and not a PID estimator.
+- It is a controlled **dependence proxy** used to validate whether the generator induces the intended cross-view geometry in the observations.
+
 Expected `U/R` signatures:
 
 - `U1/U2/U3`: low pairwise dependence (near noise floor),
@@ -183,6 +198,24 @@ cfg = PIDDatasetConfig(
 gen = PIDSar3DatasetGenerator(cfg)
 ```
 
+To amplify atom families (or specific atoms) unequally, use gain controls:
+
+```python
+cfg = PIDDatasetConfig(
+    seed=0,
+    unique_gain=1.6,       # boost all U atoms
+    redundancy_gain=0.8,   # suppress all R atoms
+    synergy_gain=1.0,
+    pid_gain_overrides={
+        3: 2.0,  # specifically boost R12
+        6: 0.7,  # specifically weaken R123
+    },
+)
+gen = PIDSar3DatasetGenerator(cfg)
+```
+
+The effective signal amplitude becomes `alpha_eff = alpha * gain(pid_id)`, while the additive noise scale `sigma` is unchanged.
+
 ### 3.2 Generate a Single Sample
 
 ```python
@@ -220,6 +253,9 @@ np.savez_compressed("data/pid_sar3_ur_train.npz", **batch)
 
 The main U/R plots are produced by these test functions in `tests/test_pid_sar3_dataset.py`:
 
+- `test_plot_atom_gain_controls_ur()`
+- `test_plot_pid_metadata_distributions()`
+- `test_plot_pid_dependence_distributions_boxplots()`
 - `test_plot_ur_compact_signature_grid_over_sigma()`
 - `test_plot_ur_hyperparameter_sweeps_compact()`
 - `test_plot_ur_intuition_scatter_examples()`
@@ -233,6 +269,7 @@ These functions are written as tests so they can serve both as regression checks
 ```bash
 python - <<'PY'
 from tests.test_pid_sar3_dataset import (
+    test_plot_atom_gain_controls_ur,
     test_plot_pid_metadata_distributions,
     test_plot_pid_dependence_distributions_boxplots,
     test_plot_ur_compact_signature_grid_over_sigma,
@@ -240,6 +277,7 @@ from tests.test_pid_sar3_dataset import (
     test_plot_ur_intuition_scatter_examples,
 )
 
+test_plot_atom_gain_controls_ur()
 test_plot_pid_metadata_distributions()
 test_plot_pid_dependence_distributions_boxplots()
 test_plot_ur_compact_signature_grid_over_sigma()
@@ -251,6 +289,7 @@ PY
 
 Output figures:
 
+- `test_outputs/pid_sar3/atom_gain_controls_ur.png`
 - `test_outputs/pid_sar3/pid_metadata_distributions.png`
 - `test_outputs/pid_sar3/pid_dependence_distributions_boxplots.png`
 - `test_outputs/pid_sar3/ur_compact_signature_grid_over_sigma.png`
@@ -275,6 +314,33 @@ pid_schedule = np.repeat(ur_pid_ids, n_per_atom)
 batch = gen.generate(n=len(pid_schedule), pid_ids=pid_schedule.tolist())
 np.savez_compressed("data/pid_sar3_ur_train.npz", **batch)
 print("Saved data/pid_sar3_ur_train.npz with", len(pid_schedule), "samples")
+PY
+```
+
+### 4.2b Generate a U/R Dataset with Intentional U/R Imbalance (Gain Controls)
+
+```bash
+mkdir -p data
+python - <<'PY'
+import numpy as np
+from pid_sar3_dataset import PIDDatasetConfig, PIDSar3DatasetGenerator
+
+cfg = PIDDatasetConfig(
+    seed=7,
+    d=32,
+    m=8,
+    sigma=0.45,
+    unique_gain=1.5,
+    redundancy_gain=0.9,
+    pid_gain_overrides={3: 2.0, 6: 0.6},  # stronger R12, weaker R123
+)
+gen = PIDSar3DatasetGenerator(cfg)
+
+ur_pid_ids = [0, 1, 2, 3, 4, 5, 6]
+pid_schedule = np.repeat(ur_pid_ids, 3000)
+batch = gen.generate(n=len(pid_schedule), pid_ids=pid_schedule.tolist())
+np.savez_compressed("data/pid_sar3_ur_imbalanced_gain.npz", **batch)
+print("Saved data/pid_sar3_ur_imbalanced_gain.npz")
 PY
 ```
 
@@ -306,7 +372,33 @@ PY
 
 This section explains the key concepts using the generated figures.
 
-### 5.1 Figure A: PID Metadata Distributions (Sanity Check)
+### 5.1 Figure A: Atom Gain Controls (Amplifying U vs R Unequally)
+
+File:
+
+- `test_outputs/pid_sar3/atom_gain_controls_ur.png`
+
+![Atom gain controls for U/R](test_outputs/pid_sar3/atom_gain_controls_ur.png)
+
+What it shows:
+
+- `baseline`: default gains (`unique_gain=1`, `redundancy_gain=1`)
+- `boost_U`: increased signal amplitude only for unique atoms
+- `boost_R`: increased signal amplitude only for redundancy atoms
+- `unequal_R`: per-`pid` overrides (e.g., stronger `R12`, weaker `R123`)
+
+How to read it:
+
+- left panel tracks how gain controls change observed scale (mean `||x1||`),
+- right panel tracks how gain controls change dependence (`D(1,2)`),
+- boosting redundancy should raise `D(1,2)` for `R12` more than for `U1`,
+- per-`pid` overrides let you create unequal difficulty within the same atom family.
+
+Why this matters:
+
+- this gives a direct mechanism to create stress tests (e.g., "strong unique, weak redundancy" or "dominant `R12` but weak `R123`") and examine how objectives behave under controlled imbalance.
+
+### 5.2 Figure B: PID Metadata Distributions (Sanity Check)
 
 File:
 
@@ -325,7 +417,7 @@ Why this matters:
 
 - it verifies that the generator metadata are sampled as intended and that atom-specific parameters are activated only in the relevant atom families.
 
-### 5.2 Figure B: PID Dependence Distributions (Repeated-Batch Variability)
+### 5.3 Figure C: PID Dependence Distributions (Repeated-Batch Variability)
 
 File:
 
@@ -349,7 +441,7 @@ Why this matters:
 
 - it demonstrates robustness of the intended dependence topology across repeated sampling, which is useful for substantiating claims in the text.
 
-### 5.3 Figure C: U/R Signature Grid Across Noise
+### 5.4 Figure D: U/R Signature Grid Across Noise
 
 File:
 
@@ -376,7 +468,7 @@ Why this is useful:
 
 - It is a single compact sanity-check that immediately reveals whether the generator is producing the intended dependence topology.
 
-### 5.4 Figure D: Hyperparameter Sweeps (`rho`, `sigma`, `alpha`)
+### 5.5 Figure E: Hyperparameter Sweeps (`rho`, `sigma`, `alpha`)
 
 File:
 
@@ -399,7 +491,7 @@ Why this is useful:
 
 - It ties abstract hyperparameters to direct geometric/statistical effects in the observed data.
 
-### 5.5 Figure E: PCA Intuition Scatter Plots (What You Liked)
+### 5.6 Figure F: PCA Intuition Scatter Plots (What You Liked)
 
 File:
 

@@ -408,6 +408,70 @@ def test_plot_ur_intuition_scatter_examples():
     assert np.all(np.isfinite(corr_table))
 
 
+def test_plot_atom_gain_controls_ur():
+    """
+    Demonstrate controllable atom-family scaling.
+    We compare baseline vs boosted-U vs boosted-R vs per-pid overrides.
+    """
+    out_dir = _ensure_plot_dir()
+    scenarios = [
+        ("baseline", dict(unique_gain=1.0, redundancy_gain=1.0)),
+        ("boost_U", dict(unique_gain=1.8, redundancy_gain=1.0)),
+        ("boost_R", dict(unique_gain=1.0, redundancy_gain=1.8)),
+        ("unequal_R", dict(unique_gain=1.0, redundancy_gain=1.0, pid_gain_overrides={3: 2.0, 6: 0.7})),
+    ]
+    target_pids = [(0, "U1"), (3, "R12"), (6, "R123")]
+
+    mean_norms = np.zeros((len(scenarios), len(target_pids)), dtype=np.float32)
+    d12_vals = np.zeros((len(scenarios), len(target_pids)), dtype=np.float32)
+
+    for s_idx, (_, gains) in enumerate(scenarios):
+        cfg = PIDDatasetConfig(
+            d=32,
+            m=8,
+            sigma=0.45,
+            rho_choices=(0.5,),  # fix rho to isolate gain effect
+            hop_choices=(1, 2, 3, 4),
+            seed=700 + s_idx,
+            deleakage_fit_samples=1024,
+            **gains,
+        )
+        gen = PIDSar3DatasetGenerator(cfg)
+        for p_idx, (pid_id, _) in enumerate(target_pids):
+            batch = _generate_fixed_pid(gen, pid_id=pid_id, n=700)
+            mean_norms[s_idx, p_idx] = _mean_view_norm(batch, "x1")
+            d12_vals[s_idx, p_idx] = _dependence_proxy(batch["x1"], batch["x2"])
+
+    fig, axes = plt.subplots(1, 2, figsize=(12.0, 4.5))
+    x = np.arange(len(target_pids))
+    width = 0.18
+    colors = ["#4c78a8", "#f58518", "#54a24b", "#b279a2"]
+
+    for s_idx, (label, _) in enumerate(scenarios):
+        offset = (s_idx - 1.5) * width
+        axes[0].bar(x + offset, mean_norms[s_idx], width=width, label=label, color=colors[s_idx], alpha=0.85)
+        axes[1].bar(x + offset, d12_vals[s_idx], width=width, label=label, color=colors[s_idx], alpha=0.85)
+
+    tick_labels = [label for _, label in target_pids]
+    for ax in axes:
+        ax.set_xticks(x)
+        ax.set_xticklabels(tick_labels)
+        ax.grid(axis="y", alpha=0.25)
+
+    axes[0].set_title("Effect of atom gain controls on observed norm (view 1)")
+    axes[0].set_ylabel("mean ||x1||")
+    axes[1].set_title("Effect of atom gain controls on D(1,2)")
+    axes[1].set_ylabel("dependence proxy")
+    axes[1].legend(fontsize=8)
+
+    _savefig(out_dir / "atom_gain_controls_ur.png")
+
+    # Expected directional effects (with fixed rho and same sigma).
+    assert mean_norms[1, 0] > mean_norms[0, 0]  # boost_U increases U1 scale
+    assert d12_vals[2, 1] > d12_vals[0, 1]      # boost_R increases R12 dependence
+    assert d12_vals[3, 1] > d12_vals[0, 1]      # per-pid R12 override increases D(1,2)
+
+
 def test_plot_pid_metadata_distributions():
     """
     Distribution-oriented summary across all pid atoms:
@@ -559,6 +623,7 @@ if __name__ == "__main__":
     test_plot_pairwise_dependence_signatures()
     test_plot_redundancy_monotonicity_vs_rho()
     test_plot_synergy_delta_vs_hop()
+    test_plot_atom_gain_controls_ur()
     test_plot_ur_compact_signature_grid_over_sigma()
     test_plot_ur_hyperparameter_sweeps_compact()
     test_plot_ur_intuition_scatter_examples()

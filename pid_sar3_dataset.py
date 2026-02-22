@@ -34,6 +34,10 @@ class PIDDatasetConfig:
     deleakage_fit_samples: int = 2048
     deleakage_ridge: float = 1e-4
     synergy_hidden_scale: float = 1.0
+    unique_gain: float = 1.0
+    redundancy_gain: float = 1.0
+    synergy_gain: float = 1.0
+    pid_gain_overrides: Optional[Dict[int, float]] = None
 
 
 class FixedSynergyMLP:
@@ -153,6 +157,15 @@ class PIDSar3DatasetGenerator:
     def _sample_hop(self) -> int:
         return int(self.rng.choice(np.asarray(self.cfg.hop_choices)))
 
+    def _atom_gain(self, pid_id: int) -> float:
+        if self.cfg.pid_gain_overrides is not None and pid_id in self.cfg.pid_gain_overrides:
+            return float(self.cfg.pid_gain_overrides[pid_id])
+        if pid_id <= 2:
+            return float(self.cfg.unique_gain)
+        if pid_id <= 6:
+            return float(self.cfg.redundancy_gain)
+        return float(self.cfg.synergy_gain)
+
     def _project(self, view: int, comp: str, latent: np.ndarray, alpha: float) -> np.ndarray:
         return alpha * (self.P[view][comp] @ latent)
 
@@ -163,7 +176,7 @@ class PIDSar3DatasetGenerator:
         if pid_id not in PID_ID_TO_NAME:
             raise ValueError(f"Invalid pid_id={pid_id}")
 
-        alpha = self._sample_alpha()
+        alpha = self._sample_alpha() * self._atom_gain(pid_id)
         sigma = float(self.cfg.sigma)
         rho = -1.0
         hop = 0

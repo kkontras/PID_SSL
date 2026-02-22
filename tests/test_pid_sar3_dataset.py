@@ -408,6 +408,151 @@ def test_plot_ur_intuition_scatter_examples():
     assert np.all(np.isfinite(corr_table))
 
 
+def test_plot_pid_metadata_distributions():
+    """
+    Distribution-oriented summary across all pid atoms:
+    - class counts (balanced schedule)
+    - alpha distributions per pid
+    - rho usage for redundancy atoms
+    - hop usage for synergy atoms
+    """
+    out_dir = _ensure_plot_dir()
+    gen = _make_generator(seed=501, sigma=0.45)
+    pid_names = all_pid_names()
+
+    n_per_pid = 350
+    pid_schedule = np.repeat(np.arange(10), n_per_pid)
+    batch = gen.generate(n=len(pid_schedule), pid_ids=pid_schedule.tolist())
+
+    pid_arr = batch["pid_id"]
+    alpha_arr = batch["alpha"]
+    rho_arr = batch["rho"]
+    hop_arr = batch["hop"]
+
+    fig, axes = plt.subplots(2, 2, figsize=(12.0, 8.0))
+
+    # (1) Class counts
+    counts = np.bincount(pid_arr, minlength=10)
+    axes[0, 0].bar(np.arange(10), counts, color="#3b7ddd")
+    axes[0, 0].set_title("Class counts (balanced generation schedule)")
+    axes[0, 0].set_xlabel("pid_id")
+    axes[0, 0].set_ylabel("count")
+    axes[0, 0].set_xticks(np.arange(10))
+    axes[0, 0].set_xticklabels([str(i) for i in range(10)], rotation=0)
+    axes[0, 0].grid(axis="y", alpha=0.25)
+
+    # (2) Alpha distributions by pid (compact boxplots)
+    alpha_groups = [alpha_arr[pid_arr == i] for i in range(10)]
+    bp = axes[0, 1].boxplot(alpha_groups, patch_artist=True, showfliers=False)
+    for patch in bp["boxes"]:
+        patch.set_facecolor("#70ad47")
+        patch.set_alpha(0.6)
+    axes[0, 1].set_title("Per-pid alpha distribution")
+    axes[0, 1].set_xlabel("pid_id")
+    axes[0, 1].set_ylabel("alpha")
+    axes[0, 1].set_xticks(np.arange(1, 11))
+    axes[0, 1].set_xticklabels([str(i) for i in range(10)])
+    axes[0, 1].grid(axis="y", alpha=0.25)
+
+    # (3) Rho values only for redundancy atoms
+    red_pid_ids = [3, 4, 5, 6]
+    red_labels = [pid_names[i] for i in red_pid_ids]
+    red_rho_groups = [rho_arr[pid_arr == i] for i in red_pid_ids]
+    axes[1, 0].hist(
+        red_rho_groups,
+        bins=np.array([0.05, 0.35, 0.65, 0.95]),
+        label=red_labels,
+        alpha=0.7,
+        stacked=False,
+    )
+    axes[1, 0].set_title("rho distribution for redundancy atoms")
+    axes[1, 0].set_xlabel("rho")
+    axes[1, 0].set_ylabel("count")
+    axes[1, 0].legend(fontsize=8)
+    axes[1, 0].grid(axis="y", alpha=0.25)
+
+    # (4) Hop values only for synergy atoms
+    syn_pid_ids = [7, 8, 9]
+    syn_labels = [pid_names[i] for i in syn_pid_ids]
+    hop_bins = np.arange(0.5, 5.6, 1.0)
+    hop_groups = [hop_arr[pid_arr == i] for i in syn_pid_ids]
+    axes[1, 1].hist(hop_groups, bins=hop_bins, label=syn_labels, alpha=0.7)
+    axes[1, 1].set_title("hop distribution for synergy atoms")
+    axes[1, 1].set_xlabel("hop")
+    axes[1, 1].set_ylabel("count")
+    axes[1, 1].set_xticks([1, 2, 3, 4])
+    axes[1, 1].legend(fontsize=8)
+    axes[1, 1].grid(axis="y", alpha=0.25)
+
+    _savefig(out_dir / "pid_metadata_distributions.png")
+
+    assert np.all(counts == n_per_pid)
+    for vals in red_rho_groups:
+        uniq = [float(v) for v in np.unique(vals)]
+        assert all(any(abs(v - ref) < 1e-3 for ref in (0.2, 0.5, 0.8)) for v in uniq)
+    for vals in hop_groups:
+        assert set(np.unique(vals).astype(int)).issubset({1, 2, 3, 4})
+
+
+def test_plot_pid_dependence_distributions_boxplots():
+    """
+    Distribution of pairwise dependence proxy per pid (repeated mini-batches).
+    Produces boxplots that are useful in the MD to show variability, not only means.
+    """
+    out_dir = _ensure_plot_dir()
+    gen = _make_generator(seed=601, sigma=0.45)
+    pid_names = all_pid_names()
+
+    repeats = 18
+    n_per_repeat = 220
+    pairs = [("x1", "x2"), ("x1", "x3"), ("x2", "x3")]
+    pair_titles = ["D(1,2)", "D(1,3)", "D(2,3)"]
+
+    scores = np.zeros((3, 10, repeats), dtype=np.float32)
+    for p_idx, (a, b) in enumerate(pairs):
+        for pid_id in range(10):
+            for r in range(repeats):
+                batch = _generate_fixed_pid(gen, pid_id=pid_id, n=n_per_repeat)
+                scores[p_idx, pid_id, r] = _dependence_proxy(batch[a], batch[b])
+
+    fig, axes = plt.subplots(3, 1, figsize=(12.0, 9.4), sharex=True)
+    colors = ["#3b7ddd", "#d95f02", "#1b9e77"]
+
+    for p_idx, ax in enumerate(axes):
+        data = [scores[p_idx, pid_id, :] for pid_id in range(10)]
+        bp = ax.boxplot(data, patch_artist=True, showfliers=False)
+        for patch in bp["boxes"]:
+            patch.set_facecolor(colors[p_idx])
+            patch.set_alpha(0.45)
+        ax.set_title(f"{pair_titles[p_idx]} across pid atoms (distribution over repeated batches)")
+        ax.set_ylabel("dependence proxy")
+        ax.grid(axis="y", alpha=0.25)
+
+        # Light markers for expected dominant rows.
+        if p_idx == 0:
+            ax.axvspan(3.6, 4.4, color="gold", alpha=0.12)  # R12 (pid 3, box index 4)
+        elif p_idx == 1:
+            ax.axvspan(4.6, 5.4, color="gold", alpha=0.12)  # R13
+        else:
+            ax.axvspan(5.6, 6.4, color="gold", alpha=0.12)  # R23
+        ax.axvspan(6.6, 7.4, color="purple", alpha=0.08)  # R123
+
+    axes[-1].set_xticks(np.arange(1, 11))
+    axes[-1].set_xticklabels([f"{i}:{name}" for i, name in enumerate(pid_names)], rotation=20, ha="right")
+    axes[-1].set_xlabel("pid atom")
+
+    _savefig(out_dir / "pid_dependence_distributions_boxplots.png")
+
+    # Basic signal checks on median behavior.
+    med_d12 = np.median(scores[0], axis=1)
+    med_d13 = np.median(scores[1], axis=1)
+    med_d23 = np.median(scores[2], axis=1)
+    assert med_d12[3] > med_d12[0]  # R12 > U1 on pair (1,2)
+    assert med_d13[4] > med_d13[0]  # R13 > U1 on pair (1,3)
+    assert med_d23[5] > med_d23[0]  # R23 > U1 on pair (2,3)
+    assert np.mean([med_d12[6], med_d13[6], med_d23[6]]) > np.mean([med_d12[0], med_d13[0], med_d23[0]])
+
+
 if __name__ == "__main__":
     # Convenience local runner without pytest.
     test_dataset_shapes_and_metadata()
@@ -417,4 +562,6 @@ if __name__ == "__main__":
     test_plot_ur_compact_signature_grid_over_sigma()
     test_plot_ur_hyperparameter_sweeps_compact()
     test_plot_ur_intuition_scatter_examples()
+    test_plot_pid_metadata_distributions()
+    test_plot_pid_dependence_distributions_boxplots()
     print(f"Saved plots to {PLOT_DIR.resolve()}")

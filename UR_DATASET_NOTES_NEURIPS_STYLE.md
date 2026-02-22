@@ -1,244 +1,249 @@
-# PID-SAR-3++ Dataset and U/R Diagnostics: Formal Specification, Code Tutorial, and Intuition Plots
+# PID-SAR-3++: Formal Dataset Specification, Implementation Tutorial, and U/R Intuition Figures
 
-This document is organized in the order requested:
+This document has three parts:
 
-1. A formal, paper-style description of the dataset and task (with equations).
-2. A code-oriented tutorial showing how the dataset is implemented and how to generate subsets.
-3. Explanatory figures (including PCA-based intuition plots) and an interpretation of what they show.
+1. A formal dataset/task specification written in a paper-style format.
+2. A code tutorial mapping the specification to the implementation.
+3. Explanatory U/R figures (including PCA-based scatter plots) with interpretation.
 
-The implementation referenced here is in:
+Reference implementation:
 
 - `pid_sar3_dataset.py`
 - `tests/test_pid_sar3_dataset.py`
 
-## 1. Formal Dataset and Task Description (Paper Style)
+## 1. Formal Dataset and Task Specification
 
-### 1.1 Problem Setting
+### 1.1 Dataset Overview and Notation
 
-We consider a synthetic three-view dataset designed to evaluate multi-view representation learning objectives under controlled information structure. Each sample consists of three observations
+PID-SAR-3++ is a synthetic three-view benchmark for evaluating multi-view representation learning under controlled information structure. Each sample contains three observations
 
-\[
+$$
 x_1, x_2, x_3 \in \mathbb{R}^d,
-\]
+$$
 
-generated such that **exactly one Partial Information Decomposition (PID) atom** is present per sample. The dataset supports three classes of information atoms:
+and is generated so that **exactly one PID-inspired information atom** is active per sample. The atom families are:
 
-\[
+$$
 \text{Unique} \ (U), \qquad \text{Redundancy} \ (R), \qquad \text{Directional Synergy} \ (S).
-\]
+$$
 
-The full atom set is
+The full atom set is:
 
-\[
+$$
 \mathcal{A} = \{U_1,U_2,U_3,R_{12},R_{13},R_{23},R_{123},S_{12 \to 3},S_{13 \to 2},S_{23 \to 1}\}.
-\]
+$$
 
-The corresponding categorical label is `pid_id \in \{0,\dots,9\}`.
+Each sample is annotated with a categorical atom identifier $\mathrm{pid\_id}\in\{0,\dots,9\}$ (used for evaluation only, not for SSL training).
 
-Each generated sample returns:
+The generator returns the tuple:
 
-\[
+$$
 (x_1,x_2,x_3,\texttt{pid\_id},\alpha,\sigma,\rho,h),
-\]
+$$
 
-where:
+where $\alpha$ is the signal amplitude, $\sigma$ is the observation noise scale, $\rho$ is the redundancy overlap parameter (undefined for non-redundancy atoms; represented as `-1` in code), and $h$ is the synergy depth parameter (undefined for non-synergy atoms; represented as `0` in code).
 
-- \(\alpha\) is a per-sample signal amplitude,
-- \(\sigma\) is the observation noise scale,
-- \(\rho\) is the redundancy overlap parameter (used only for \(R\) atoms),
-- \(h\) is the synergy depth / hop parameter (used only for \(S\) atoms).
+### 1.2 Task Definition and Evaluation Objective
 
-### 1.2 Learning Task
+The benchmark is designed for the following training/evaluation protocol.
 
-The primary downstream use is to train multi-view self-supervised objectives on \((x_1,x_2,x_3)\) **without access to `pid_id`**, then evaluate whether learned representations preserve:
+Training input:
 
-- unique information,
-- pairwise/triple redundancy,
-- directional synergy.
+- the learner observes only $(x_1,x_2,x_3)$;
+- the learner does not receive $\mathrm{pid\_id}$, $\rho$, or $h$.
 
-Before training any encoder, the generator itself should be validated on raw observations \(x_k\) using dependence and synergy proxies. This document focuses on the **U/R subset diagnostics** as the first validation step.
+Evaluation objective:
 
-### 1.3 Global Parameters and Sampling
+- train a multi-view self-supervised objective on the generated observations;
+- freeze the learned encoders;
+- evaluate whether the resulting representations preserve the intended information structure (unique, redundant, and directional synergistic components).
 
-Typical defaults:
+Generator validation (pre-model):
 
-\[
+- prior to encoder training, one validates the generator directly on raw observations using dependence and synergy proxy metrics;
+- in this document, the emphasis is on the U/R subset because it provides the simplest and most interpretable sanity checks.
+
+### 1.3 Generative Parameters
+
+The latent dimensionality satisfies $m \ll d$. Typical defaults used in the current implementation are:
+
+$$
 d = 32,\qquad m = 8,
-\]
-\[
+$$
+$$
 \alpha \sim \mathrm{Uniform}(\alpha_{\min}, \alpha_{\max}),\qquad \sigma > 0,
-\]
-\[
+$$
+$$
 \rho \in \mathcal{R}\subset(0,1),\qquad h \in \mathcal{H}\subset\mathbb{N}.
-\]
+$$
 
-In the current implementation (default configuration in `pid_sar3_dataset.py`):
+Default values in `pid_sar3_dataset.py`:
 
-- \(\alpha_{\min}=0.8,\ \alpha_{\max}=1.2\)
-- \(\mathcal{R}=\{0.2, 0.5, 0.8\}\)
-- \(\mathcal{H}=\{1,2,3,4\}\)
+- $\alpha_{\min}=0.8,\ \alpha_{\max}=1.2$
+- $\mathcal{R}=\{0.2, 0.5, 0.8\}$
+- $\mathcal{H}=\{1,2,3,4\}$
 
-### 1.4 Fixed Projection Matrices (Sampled Once Per Dataset Seed)
+### 1.4 Fixed Projection Operators (Sampled Once Per Dataset Seed)
 
-For each view \(k \in \{1,2,3\}\) and each component \(c\), a fixed projection matrix is sampled:
+For each view $k \in \{1,2,3\}$ and each component $c$, a fixed projection matrix is sampled:
 
-\[
+$$
 P_k^{(c)} \in \mathbb{R}^{d \times m},
 \qquad
 P_k^{(c)}[i,j] \sim \mathcal{N}(0,1/d).
-\]
+$$
 
 Columns are normalized:
 
-\[
+$$
 P_k^{(c)}[:,j] \leftarrow \frac{P_k^{(c)}[:,j]}{\left\|P_k^{(c)}[:,j]\right\|_2}.
-\]
+$$
 
-These matrices remain fixed for all samples generated under the same dataset seed. This ensures that variation across samples arises from latent variables and noise, not from changing projection operators.
+These matrices are sampled once per dataset seed and then held fixed. Consequently, inter-sample variation is attributable only to latent draws, amplitudes, and observation noise.
 
 ### 1.5 Observation Noise
 
 All views receive additive isotropic Gaussian noise:
 
-\[
+$$
 \varepsilon_k \sim \mathcal{N}(0,\sigma^2 I_d), \qquad k\in\{1,2,3\}.
-\]
+$$
 
 The final observation is always of the form:
 
-\[
+$$
 x_k = \text{signal}_k + \varepsilon_k.
-\]
+$$
 
 ### 1.6 Unique Atoms
 
-For \(U_i\), sample
+For $U_i$, sample
 
-\[
+$$
 u \sim \mathcal{N}(0,I_m),
-\]
+$$
 
 and define
 
-\[
+$$
 x_i = \alpha P_i^{(U_i)} u + \varepsilon_i,
-\]
-\[
+$$
+$$
 x_j = \varepsilon_j \quad \text{for } j\neq i.
-\]
+$$
 
 This creates signal in exactly one view and noise-only observations in the other two.
 
 ### 1.7 Pairwise Redundancy Atoms
 
-For \(R_{ij}\), sample
+For $R_{ij}$, sample
 
-\[
+$$
 r,\eta_i,\eta_j \overset{\text{i.i.d.}}{\sim} \mathcal{N}(0,I_m),
-\]
+$$
 
 and define noisy shared latents
 
-\[
+$$
 r_i = \sqrt{\rho}\,r + \sqrt{1-\rho}\,\eta_i,
 \qquad
 r_j = \sqrt{\rho}\,r + \sqrt{1-\rho}\,\eta_j.
-\]
+$$
 
 Then
 
-\[
+$$
 x_i = \alpha P_i^{(R_{ij})} r_i + \varepsilon_i,
-\]
-\[
+$$
+$$
 x_j = \alpha P_j^{(R_{ij})} r_j + \varepsilon_j,
-\]
-\[
+$$
+$$
 x_k = \varepsilon_k \quad \text{for } k \notin \{i,j\}.
-\]
+$$
 
-The overlap parameter \(\rho\) controls the strength of shared structure between the two active views.
+The overlap parameter $\rho$ controls the strength of shared structure between the two active views.
 
 ### 1.8 Triple Redundancy Atom
 
-For \(R_{123}\), sample
+For $R_{123}$, sample
 
-\[
+$$
 r,\eta_1,\eta_2,\eta_3 \overset{\text{i.i.d.}}{\sim} \mathcal{N}(0,I_m),
-\]
+$$
 
 and set
 
-\[
+$$
 r_k = \sqrt{\rho}\,r + \sqrt{1-\rho}\,\eta_k,\qquad k\in\{1,2,3\}.
-\]
+$$
 
 Then
 
-\[
+$$
 x_k = \alpha P_k^{(R_{123})} r_k + \varepsilon_k,\qquad k\in\{1,2,3\}.
-\]
+$$
 
 This induces shared structure across all three views.
 
 ### 1.9 Directional Synergy Atoms
 
-For \(S_{ij\to k}\), sample
+For $S_{ij\to k}$, sample
 
-\[
+$$
 a,b \sim \mathcal{N}(0,I_m), \qquad h \in \mathcal{H}.
-\]
+$$
 
 Source views receive linearly projected latents:
 
-\[
+$$
 x_i = \alpha P_i^{(A_{ij})} a + \varepsilon_i,\qquad
 x_j = \alpha P_j^{(B_{ij})} b + \varepsilon_j.
-\]
+$$
 
-The target view is generated from a fixed nonlinear readout network \(\phi_h\):
+The target view is generated from a fixed nonlinear readout network $\phi_h$:
 
-\[
+$$
 s_0 = \phi_h([a,b]) \in \mathbb{R}^m,
-\]
+$$
 
-followed by de-leakage via precomputed linear maps \(C_a^{(h)}, C_b^{(h)}\):
+followed by de-leakage via precomputed linear maps $C_a^{(h)}, C_b^{(h)}$:
 
-\[
+$$
 s = s_0 - C_a^{(h)} a - C_b^{(h)} b.
-\]
+$$
 
 Finally,
 
-\[
+$$
 x_k = \alpha P_k^{(\mathrm{SYN}_{ij})} s + \varepsilon_k.
-\]
+$$
 
-The de-leakage step suppresses single-source linear predictability in the target latent \(s\), making the synergy structure more directional and harder to explain with single-view probes.
+The de-leakage step suppresses single-source linear predictability in the target latent $s$, making the synergy structure more directional and harder to explain with single-view probes.
 
 ### 1.10 Synergy De-leakage Fitting (Offline, Per Dataset Seed)
 
-For each hop \(h\), de-leakage maps are fit from synthetic latent samples by least squares:
+For each hop $h$, de-leakage maps are fit from synthetic latent samples by least squares:
 
-\[
+$$
 W^{(h)} = \arg\min_W \| S_0 - XW \|_F^2 + \lambda \|W\|_F^2,
-\]
+$$
 
 where
 
-\[
+$$
 X = [A \; B] \in \mathbb{R}^{N \times 2m},\qquad S_0 \in \mathbb{R}^{N \times m}.
-\]
+$$
 
 The solution is partitioned as
 
-\[
+$$
 W^{(h)} =
 \begin{bmatrix}
 C_a^{(h)} \\
 C_b^{(h)}
 \end{bmatrix},
-\]
+$$
 
 which yields the de-leakage correction used during sample generation.
 
@@ -246,31 +251,31 @@ which yields the de-leakage correction used during sample generation.
 
 ### 2.1 Symmetric Dependence Proxy
 
-Given two view matrices \(X_A, X_B\) (rows are samples), define:
+Given two view matrices $X_A, X_B$ (rows are samples), define:
 
-\[
+$$
 D(X_A, X_B) = \frac{1}{2}\left(R^2(X_A \to X_B) + R^2(X_B \to X_A)\right),
-\]
+$$
 
-where \(R^2\) is computed using ridge regression on a train/test split.
+where $R^2$ is computed using ridge regression on a train/test split.
 
 Expected U/R signatures:
 
 - `U1/U2/U3`: low pairwise dependence,
 - `Rij`: high dependence only for the matching pair,
 - `R123`: elevated dependence for all pairs,
-- dependence increases with \(\rho\),
-- dependence decreases with larger \(\sigma\).
+- dependence increases with $\rho$,
+- dependence decreases with larger $\sigma$.
 
 ### 2.2 PCA-Based Intuition View
 
 For a fixed atom, compute principal-component scores for each view:
 
-\[
+$$
 z_k = \mathrm{PC1}(X_k), \quad k\in\{1,2,3\}.
-\]
+$$
 
-Scatter plots of \((z_i,z_j)\) reveal the dominant pairwise geometric structure:
+Scatter plots of $(z_i,z_j)$ reveal the dominant pairwise geometric structure:
 
 - diffuse clouds for unique atoms,
 - aligned/elongated manifolds for redundant atoms.
@@ -322,9 +327,9 @@ print(sample["pid_id"])    # 3
 
 The U/R-only subset corresponds to:
 
-\[
+$$
 \{0,1,2,3,4,5,6\} = \{U_1,U_2,U_3,R_{12},R_{13},R_{23},R_{123}\}.
-\]
+$$
 
 ```python
 import numpy as np
@@ -462,12 +467,12 @@ File:
 
 Left panel (redundancy overlap):
 
-- For `R12`, the dependence proxy \(D(x_1,x_2)\) should increase with \(\rho\).
+- For `R12`, the dependence proxy $D(x_1,x_2)$ should increase with $\rho$.
 - Multiple curves at different `sigma` show that noise weakens observed dependence but preserves the monotonic trend.
 
 Right panel (signal amplitude and noise):
 
-- Mean \(\|x_1\|_2\) increases as `alpha` increases.
+- Mean $\|x_1\|_2$ increases as `alpha` increases.
 - Larger `sigma` shifts norms upward and broadens the effective scale (signal + noise).
 - Comparing `U1` and `R123` shows the effect under two different atom structures.
 
@@ -514,9 +519,8 @@ Important caveat (PCA sign ambiguity):
 
 ### 6.1 Methods (Dataset)
 
-We generate a synthetic three-view dataset in which each sample contains exactly one information atom from a predefined PID-inspired atom set. Let \(x_1,x_2,x_3 \in \mathbb{R}^d\) denote the observed views. For each view and atom-specific component, we sample a fixed projection matrix \(P_k^{(c)} \in \mathbb{R}^{d\times m}\) at dataset initialization. Unique atoms are generated by projecting a latent Gaussian vector into a single view, while redundant atoms are generated by mixing a shared latent Gaussian factor with view-specific Gaussian perturbations using an overlap coefficient \(\rho\). All observations include additive isotropic Gaussian noise with scale \(\sigma\), and signal amplitude is modulated by a per-sample scalar \(\alpha\). This construction provides explicit control over dependence topology (unique, pairwise redundancy, and triple redundancy) and signal-to-noise conditions.
+We generate a synthetic three-view dataset in which each sample contains exactly one information atom from a predefined PID-inspired atom set. Let $x_1,x_2,x_3 \in \mathbb{R}^d$ denote the observed views. For each view and atom-specific component, we sample a fixed projection matrix $P_k^{(c)} \in \mathbb{R}^{d\times m}$ at dataset initialization. Unique atoms are generated by projecting a latent Gaussian vector into a single view, while redundant atoms are generated by mixing a shared latent Gaussian factor with view-specific Gaussian perturbations using an overlap coefficient $\rho$. All observations include additive isotropic Gaussian noise with scale $\sigma$, and signal amplitude is modulated by a per-sample scalar $\alpha$. This construction provides explicit control over dependence topology (unique, pairwise redundancy, and triple redundancy) and signal-to-noise conditions.
 
 ### 6.2 Results (U/R Sanity Checks)
 
-On the U/R subset, pairwise dependence heatmaps recover the intended atom structure: unique atoms remain near the noise floor across all pairwise dependencies, pairwise redundant atoms activate the corresponding view pair, and triple redundancy elevates all pairwise dependencies. PCA-based scatter plots of \((\mathrm{PC1}(x_1),\mathrm{PC1}(x_2))\) provide an intuitive geometric corroboration: unique atoms appear as diffuse clouds, whereas redundant atoms exhibit aligned low-dimensional structure whose visibility degrades gracefully as the observation noise \(\sigma\) increases.
-
+On the U/R subset, pairwise dependence heatmaps recover the intended atom structure: unique atoms remain near the noise floor across all pairwise dependencies, pairwise redundant atoms activate the corresponding view pair, and triple redundancy elevates all pairwise dependencies. PCA-based scatter plots of $(\mathrm{PC1}(x_1),\mathrm{PC1}(x_2))$ provide an intuitive geometric corroboration: unique atoms appear as diffuse clouds, whereas redundant atoms exhibit aligned low-dimensional structure whose visibility degrades gracefully as the observation noise $\sigma$ increases.

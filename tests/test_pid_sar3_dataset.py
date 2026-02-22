@@ -48,6 +48,73 @@ def _linear_r2(X_train: np.ndarray, Y_train: np.ndarray, X_test: np.ndarray, Y_t
     return 1.0 - ss_res / ss_tot
 
 
+def _inv_sqrt_psd(mat: np.ndarray, eps: float = 1e-6) -> np.ndarray:
+    evals, evecs = np.linalg.eigh(mat)
+    evals = np.clip(evals, eps, None)
+    return (evecs * (1.0 / np.sqrt(evals))) @ evecs.T
+
+
+def _fit_top_cca(
+    X: np.ndarray,
+    Y: np.ndarray,
+    ridge: float = 1e-3,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Fit top-1 linear CCA on centered training data.
+    Returns (mx, my, ax, by) where mx,my are training means and ax,by are directions.
+    """
+    Xc = X - np.mean(X, axis=0, keepdims=True)
+    Yc = Y - np.mean(Y, axis=0, keepdims=True)
+    mx = np.mean(X, axis=0, keepdims=True)
+    my = np.mean(Y, axis=0, keepdims=True)
+    n = X.shape[0]
+    if n < 3:
+        raise ValueError("Need at least 3 samples for CCA")
+
+    sxx = (Xc.T @ Xc) / max(1, n - 1) + ridge * np.eye(Xc.shape[1])
+    syy = (Yc.T @ Yc) / max(1, n - 1) + ridge * np.eye(Yc.shape[1])
+    sxy = (Xc.T @ Yc) / max(1, n - 1)
+
+    sxx_inv_sqrt = _inv_sqrt_psd(sxx)
+    syy_inv_sqrt = _inv_sqrt_psd(syy)
+    wx = sxx_inv_sqrt @ sxy @ syy_inv_sqrt
+    u, _, vt = np.linalg.svd(wx, full_matrices=False)
+    ax = sxx_inv_sqrt @ u[:, 0]
+    by = syy_inv_sqrt @ vt.T[:, 0]
+    return mx, my, ax, by
+
+
+def _top_cca_scores(X: np.ndarray, Y: np.ndarray, ridge: float = 1e-3) -> Tuple[np.ndarray, np.ndarray, float]:
+    """
+    NumPy-only top-1 linear CCA on centered data.
+    Returns canonical scores for X and Y plus top canonical correlation.
+    """
+    mx, my, ax, by = _fit_top_cca(X, Y, ridge=ridge)
+    tx = (X - mx) @ ax
+    ty = (Y - my) @ by
+    corr = _safe_corr(tx, ty)
+    return tx, ty, float(abs(corr))
+
+
+def _top_cca_scores_holdout(
+    X: np.ndarray,
+    Y: np.ndarray,
+    ridge: float = 1e-3,
+    frac_train: float = 0.7,
+) -> Tuple[np.ndarray, np.ndarray, float]:
+    n = X.shape[0]
+    n_train = max(10, int(frac_train * n))
+    Xtr, Xte = X[:n_train], X[n_train:]
+    Ytr, Yte = Y[:n_train], Y[n_train:]
+    if Xte.shape[0] < 5:
+        Xtr, Xte = X[: n // 2], X[n // 2 :]
+        Ytr, Yte = Y[: n // 2], Y[n // 2 :]
+    mx, my, ax, by = _fit_top_cca(Xtr, Ytr, ridge=ridge)
+    tx = (Xte - mx) @ ax
+    ty = (Yte - my) @ by
+    return tx, ty, float(abs(_safe_corr(tx, ty)))
+
+
 def _random_feature_r2(
     X_train: np.ndarray,
     Y_train: np.ndarray,
@@ -448,6 +515,51 @@ def test_plot_r123_pca_all_pairs():
     assert np.all(np.isfinite(corr_table))
 
 
+def test_plot_cca_all_pairs_ur():
+    """
+    CCA companion figure: much better than PC1-vs-PC1 for cross-view shared structure.
+    Shows canonical-score scatter and top canonical correlation for U1, R12, R123.
+    """
+    out_dir = _ensure_plot_dir()
+    sigma_values = [0.15, 0.9]
+    pair_defs = [("x1", "x2", "1-2"), ("x1", "x3", "1-3"), ("x2", "x3", "2-3")]
+    cases = [(0, "U1"), (3, "R12"), (6, "R123")]
+
+    # Create one figure per sigma for readability.
+    summary = {}
+    for r, sigma in enumerate(sigma_values):
+        gen = _make_generator(seed=900 + r, sigma=sigma)
+        fig, axes = plt.subplots(len(cases), len(pair_defs), figsize=(12.4, 8.8))
+        sigma_summary = {}
+
+        for i, (pid_id, pid_label) in enumerate(cases):
+            batch = _generate_fixed_pid(gen, pid_id=pid_id, n=550)
+            sigma_summary[pid_label] = {}
+            for j, (a, b, pair_label) in enumerate(pair_defs):
+                tx, ty, cc = _top_cca_scores_holdout(batch[a], batch[b], ridge=1e-3)
+                sigma_summary[pid_label][pair_label] = cc
+
+                ax = axes[i, j]
+                alpha_te = batch["alpha"][-len(tx) :]
+                ax.scatter(tx, ty, s=8, alpha=0.45, c=alpha_te, cmap="viridis")
+                ax.set_title(f"{pid_label} | pair {pair_label}\nCCA1 |rho|={cc:.2f}")
+                ax.set_xlabel(f"CCA1({a})")
+                ax.set_ylabel(f"CCA1({b})")
+                ax.grid(alpha=0.2)
+                lim = np.percentile(np.abs(np.concatenate([tx, ty])), 98) + 1e-6
+                ax.set_xlim(-lim, lim)
+                ax.set_ylim(-lim, lim)
+
+        fig.suptitle(f"CCA companion (sigma={sigma}): cross-view shared structure in canonical coordinates")
+        _savefig(out_dir / f"cca_all_pairs_ur_sigma_{str(sigma).replace('.', 'p')}.png")
+        summary[sigma] = sigma_summary
+
+    # Holdout-CCA sanity checks: U1 low on (1,2), R12 elevated on (1,2), R123 elevated on average at low sigma.
+    low = summary[0.15]
+    assert low["R12"]["1-2"] > low["U1"]["1-2"]
+    assert np.mean(list(low["R123"].values())) > low["U1"]["1-2"]
+
+
 def test_plot_atom_gain_controls_ur():
     """
     Demonstrate controllable atom-family scaling.
@@ -666,6 +778,7 @@ if __name__ == "__main__":
     test_plot_atom_gain_controls_ur()
     test_plot_ur_compact_signature_grid_over_sigma()
     test_plot_ur_hyperparameter_sweeps_compact()
+    test_plot_cca_all_pairs_ur()
     test_plot_ur_intuition_scatter_examples()
     test_plot_r123_pca_all_pairs()
     test_plot_pid_metadata_distributions()

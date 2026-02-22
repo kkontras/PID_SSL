@@ -150,7 +150,13 @@ The left panel links the redundancy mechanism directly to the data statistics: b
 
 ![U/R PCA intuition scatter plots](test_outputs/pid_sar3/ur_intuition_scatter_examples.png)
 
-These plots visualize the first principal-component scores $z_k=\mathrm{PC1}(X_k)$ and scatter paired scores $(z_1,z_2)$ for the same samples. They are not estimators of PID quantities, but they are highly interpretable geometric diagnostics. The useful reading strategy is to compare the *shape* of the cloud and the *magnitude* of the panel correlation, not the sign of the slope. In the currently generated figure (same code path and seeds as the test), the low-noise row (`sigma = 0.15`) shows a near-zero association for `U1` (approximately $|r| \approx 0.016$), while `R12` and `R123` show visibly stronger alignment (approximately $|r| \approx 0.218$ and $|r| \approx 0.274$, respectively). In the high-noise row (`sigma = 0.9`), the `R12` panel still retains a visible dependence signal (approximately $|r| \approx 0.137$), whereas `U1` remains near zero (approximately $|r| \approx 0.003$) and `R123` may collapse toward the noise floor in this particular projection/view pair (approximately $|r| \approx 0.007$), which is a useful reminder that PCA is a low-dimensional diagnostic of one pair of views rather than a complete summary of the atom. Because PCA signs are arbitrary, slope direction may flip across runs; the presence and magnitude of alignment are the meaningful features.
+These plots visualize the first principal-component scores $z_k=\mathrm{PC1}(X_k)$ and scatter paired scores $(z_1,z_2)$ for the same samples. They are not estimators of PID quantities, but they are highly interpretable geometric diagnostics. The useful reading strategy is to compare the *shape* of the cloud and the *magnitude* of the panel correlation, not the sign of the slope. In the currently generated figure (same code path and seeds as the test), the low-noise row (`sigma = 0.15`) shows a near-zero association for `U1` (approximately $|r| \approx 0.016$), while `R12` and `R123` show visibly stronger alignment (approximately $|r| \approx 0.218$ and $|r| \approx 0.274$, respectively). In the high-noise row (`sigma = 0.9`), the `R12` panel still retains a visible dependence signal (approximately $|r| \approx 0.137$), whereas `U1` remains near zero (approximately $|r| \approx 0.003$) and `R123` may collapse toward the noise floor in this particular `(x1,x2)` PCA projection (approximately $|r| \approx 0.007$). This is a limitation of a single 2D PCA view, not evidence that the `R123` atom disappeared. Because PCA signs are arbitrary, slope direction may flip across runs; the presence and magnitude of alignment are the meaningful features.
+
+### 3.7 Figure G: `R123` PCA Companion Across All View Pairs
+
+![R123 PCA all pairs](test_outputs/pid_sar3/r123_pca_all_pairs.png)
+
+This companion figure addresses exactly that ambiguity by plotting `R123` across all three view pairs, `(x1,x2)`, `(x1,x3)`, and `(x2,x3)`, each at low and high noise. At low noise (`sigma = 0.15`), the current run shows a strong PCA alignment for pair `1-2` (approximately $|r| \approx 0.265$) and a visible alignment for pair `1-3` (approximately $|r| \approx 0.170$), while pair `2-3` is weak in this specific PC1-vs-PC1 view (approximately $|r| \approx 0.008$). At high noise (`sigma = 0.9`), all three PCA-pair correlations become small (approximately $|r| \approx 0.003$, $0.038$, and $0.071$), which is consistent with additive noise washing out low-dimensional projections. The practical takeaway is that PCA panels are qualitative projection diagnostics, while the dependence-proxy figures (`D(1,2)`, `D(1,3)`, `D(2,3)`) remain the primary evidence for the intended redundancy topology.
 
 ## 4. Code Tutorial (How the Dataset Is Implemented and Used)
 
@@ -231,7 +237,7 @@ np.savez_compressed("data/pid_sar3_ur_train.npz", **batch)
 
 ### 4.5 Where the Diagnostics Are Implemented
 
-The main U/R plots are produced by `test_plot_atom_gain_controls_ur()`, `test_plot_pid_metadata_distributions()`, `test_plot_pid_dependence_distributions_boxplots()`, `test_plot_ur_compact_signature_grid_over_sigma()`, `test_plot_ur_hyperparameter_sweeps_compact()`, and `test_plot_ur_intuition_scatter_examples()` in `tests/test_pid_sar3_dataset.py`. These functions are written as tests so they can serve both as regression checks and as reproducible figure-generation scripts.
+The main U/R plots are produced by `test_plot_atom_gain_controls_ur()`, `test_plot_pid_metadata_distributions()`, `test_plot_pid_dependence_distributions_boxplots()`, `test_plot_ur_compact_signature_grid_over_sigma()`, `test_plot_ur_hyperparameter_sweeps_compact()`, `test_plot_ur_intuition_scatter_examples()`, and `test_plot_r123_pca_all_pairs()` in `tests/test_pid_sar3_dataset.py`. These functions are written as tests so they can serve both as regression checks and as reproducible figure-generation scripts.
 
 ## 5. Commands to Reproduce the Dataset and Figures
 
@@ -243,6 +249,7 @@ from tests.test_pid_sar3_dataset import (
     test_plot_atom_gain_controls_ur,
     test_plot_pid_metadata_distributions,
     test_plot_pid_dependence_distributions_boxplots,
+    test_plot_r123_pca_all_pairs,
     test_plot_ur_compact_signature_grid_over_sigma,
     test_plot_ur_hyperparameter_sweeps_compact,
     test_plot_ur_intuition_scatter_examples,
@@ -251,6 +258,7 @@ from tests.test_pid_sar3_dataset import (
 test_plot_atom_gain_controls_ur()
 test_plot_pid_metadata_distributions()
 test_plot_pid_dependence_distributions_boxplots()
+test_plot_r123_pca_all_pairs()
 test_plot_ur_compact_signature_grid_over_sigma()
 test_plot_ur_hyperparameter_sweeps_compact()
 test_plot_ur_intuition_scatter_examples()
@@ -258,7 +266,7 @@ print("Saved plots under test_outputs/pid_sar3")
 PY
 ```
 
-This command generates `test_outputs/pid_sar3/atom_gain_controls_ur.png`, `test_outputs/pid_sar3/pid_metadata_distributions.png`, `test_outputs/pid_sar3/pid_dependence_distributions_boxplots.png`, `test_outputs/pid_sar3/ur_compact_signature_grid_over_sigma.png`, `test_outputs/pid_sar3/ur_hyperparameter_sweeps_compact.png`, and `test_outputs/pid_sar3/ur_intuition_scatter_examples.png`.
+This command generates `test_outputs/pid_sar3/atom_gain_controls_ur.png`, `test_outputs/pid_sar3/pid_metadata_distributions.png`, `test_outputs/pid_sar3/pid_dependence_distributions_boxplots.png`, `test_outputs/pid_sar3/r123_pca_all_pairs.png`, `test_outputs/pid_sar3/ur_compact_signature_grid_over_sigma.png`, `test_outputs/pid_sar3/ur_hyperparameter_sweeps_compact.png`, and `test_outputs/pid_sar3/ur_intuition_scatter_examples.png`.
 
 ### 5.2 Generate and Save a Balanced U/R Dataset (`.npz`)
 

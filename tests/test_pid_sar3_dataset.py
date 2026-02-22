@@ -408,6 +408,46 @@ def test_plot_ur_intuition_scatter_examples():
     assert np.all(np.isfinite(corr_table))
 
 
+def test_plot_r123_pca_all_pairs():
+    """
+    Companion PCA figure for R123 across all view pairs.
+    This helps show that a weak PC1(x1)-PC1(x2) panel at high noise does not imply no redundancy.
+    """
+    out_dir = _ensure_plot_dir()
+    sigma_values = [0.15, 0.9]
+    pair_defs = [("x1", "x2", "1-2"), ("x1", "x3", "1-3"), ("x2", "x3", "2-3")]
+
+    fig, axes = plt.subplots(2, 3, figsize=(11.4, 6.6))
+    corr_table = np.zeros((len(sigma_values), len(pair_defs)), dtype=np.float32)
+
+    for r, sigma in enumerate(sigma_values):
+        gen = _make_generator(seed=480 + r, sigma=sigma)
+        batch = _generate_fixed_pid(gen, pid_id=6, n=500)  # R123
+        pc = {k: _pc1_scores(batch[k]) for k in ("x1", "x2", "x3")}
+
+        for c, (a, b, label) in enumerate(pair_defs):
+            s1, s2 = pc[a], pc[b]
+            corr = _safe_corr(s1, s2)
+            corr_table[r, c] = corr
+
+            ax = axes[r, c]
+            ax.scatter(s1, s2, s=8, alpha=0.45, c=batch["alpha"], cmap="viridis")
+            ax.set_title(f"R123 | pair {label} | sigma={sigma}\nr={corr:.2f}")
+            ax.set_xlabel(f"PC1({a})")
+            ax.set_ylabel(f"PC1({b})")
+            ax.grid(alpha=0.2)
+            lim = np.percentile(np.abs(np.concatenate([s1, s2])), 98) + 1e-6
+            ax.set_xlim(-lim, lim)
+            ax.set_ylim(-lim, lim)
+
+    fig.suptitle("R123 PCA companion: inspect all pairs, not only (x1,x2)")
+    _savefig(out_dir / "r123_pca_all_pairs.png")
+
+    # At low noise, at least one pair should clearly show alignment.
+    assert float(np.max(np.abs(corr_table[0]))) > 0.1
+    assert np.all(np.isfinite(corr_table))
+
+
 def test_plot_atom_gain_controls_ur():
     """
     Demonstrate controllable atom-family scaling.
@@ -627,6 +667,7 @@ if __name__ == "__main__":
     test_plot_ur_compact_signature_grid_over_sigma()
     test_plot_ur_hyperparameter_sweeps_compact()
     test_plot_ur_intuition_scatter_examples()
+    test_plot_r123_pca_all_pairs()
     test_plot_pid_metadata_distributions()
     test_plot_pid_dependence_distributions_boxplots()
     print(f"Saved plots to {PLOT_DIR.resolve()}")

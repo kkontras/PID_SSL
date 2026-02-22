@@ -1,16 +1,6 @@
 # PID-SAR-3++: Formal Dataset Specification, Implementation Tutorial, and U/R Intuition Figures
 
-This document has four parts:
-
-1. A formal dataset/task specification written in a paper-style format.
-2. Validation metrics and intuition for the raw observations.
-3. A dataset-exploration section with figures and equation-linked interpretation.
-4. A code tutorial mapping the specification to the implementation.
-
-Reference implementation:
-
-- `pid_sar3_dataset.py`
-- `tests/test_pid_sar3_dataset.py`
+This document has four parts: a formal dataset/task specification written in a paper-style format, validation metrics and intuition for the raw observations, a dataset-exploration section with figures and equation-linked interpretation, and a code tutorial mapping the specification to the implementation. The reference implementation is in `pid_sar3_dataset.py` and `tests/test_pid_sar3_dataset.py`.
 
 ## 1. Formal Dataset and Task Specification
 
@@ -28,33 +18,13 @@ where `alpha` is the signal amplitude, `sigma` is the observation noise scale, `
 
 ### 1.2 Task Definition (Training and Evaluation Protocol)
 
-Training protocol:
-
-- the learner receives only the three views `(x1, x2, x3)`,
-- the learner does not receive `pid_id`, `rho`, or `h`,
-- a multi-view self-supervised objective is trained on the observations.
-
-Evaluation protocol:
-
-- encoders are frozen after training,
-- representations are evaluated for retention of unique, redundant, and directional-synergistic structure.
-
-Generator-level validation (before training encoders):
-
-- evaluate raw observations using dependence and synergy proxies,
-- verify that signatures match the intended atom-level structure.
-
-This note emphasizes the `U/R` subset first because it provides the most interpretable sanity checks.
+In the training protocol, the learner receives only the three views `(x1, x2, x3)` and does not receive `pid_id`, `rho`, or `h`; a multi-view self-supervised objective is trained directly on the observations. In the evaluation protocol, encoders are frozen after training and the resulting representations are assessed for retention of unique, redundant, and directional-synergistic structure. Before any encoder is trained, the generator itself should be validated on the raw observations using dependence and synergy proxies to verify that the empirical signatures match the intended atom-level structure. This note emphasizes the `U/R` subset first because it provides the most interpretable sanity checks.
 
 ### 1.3 Generative Parameters
 
 The latent dimensionality satisfies `m << d`. Typical defaults are $d = 32$, $m = 8$, $\alpha \sim \mathrm{Uniform}(\alpha_{\min}, \alpha_{\max})$, $\sigma > 0$, and $(\rho,h) \in \mathcal{R}\times\mathcal{H}$ with $\mathcal{R}\subset (0,1)$ and $\mathcal{H}\subset \mathbb{N}$.
 
-Default values in `pid_sar3_dataset.py`:
-
-- `alpha_min = 0.8`, `alpha_max = 1.2`
-- `R = {0.2, 0.5, 0.8}` (implemented as `rho_choices`)
-- `H = {1,2,3,4}` (implemented as `hop_choices`)
+Default values in `pid_sar3_dataset.py` are `alpha_min = 0.8`, `alpha_max = 1.2`, `rho_choices = {0.2, 0.5, 0.8}`, and `hop_choices = {1,2,3,4}`.
 
 ### 1.4 Fixed Projection Operators (Sampled Once per Dataset Seed)
 
@@ -134,39 +104,13 @@ Given two view matrices `X_A` and `X_B` (rows are samples), define $D(X_A, X_B)=
 
 where each `R^2` is computed using ridge regression on a train/test split.
 
-Intuition for `D(1,2)`:
-
-- `D(1,2)` answers: "How much predictable structure is shared between view 1 and view 2?"
-- If `x1` helps linearly predict `x2` (and vice versa), then `D(1,2)` is high.
-- If view 1 and view 2 mostly contain unrelated signal/noise, then `D(1,2)` is low.
-- In this dataset:
-  - `U1` should have low `D(1,2)` because only `x1` contains signal and `x2` is mostly noise,
-  - `R12` should have high `D(1,2)` because both views share overlapping latent structure,
-  - `R123` should also have elevated `D(1,2)` because views 1 and 2 both inherit the shared triple-redundant latent.
-
-Paper-style interpretation:
-
-- `D(1,2)` is not a causal quantity and not a PID estimator.
-- It is a controlled **dependence proxy** used to validate whether the generator induces the intended cross-view geometry in the observations.
-
-Expected `U/R` signatures:
-
-- `U1/U2/U3`: low pairwise dependence (near noise floor),
-- `R12/R13/R23`: high dependence only for the matching pair,
-- `R123`: elevated dependence across all three pairs,
-- dependence increases with `rho`,
-- dependence decreases as `sigma` increases.
+Intuitively, `D(1,2)` answers the question: "How much predictable structure is shared between view 1 and view 2?" If `x1` helps linearly predict `x2` (and conversely `x2` helps linearly predict `x1`), then `D(1,2)` is high; if the two views mostly contain unrelated signal/noise, then `D(1,2)` is low. In this dataset, `U1` should have low `D(1,2)` because only `x1` contains signal and `x2` is mostly noise, `R12` should have high `D(1,2)` because both views share overlapping latent structure, and `R123` should also have elevated `D(1,2)` because views 1 and 2 both inherit the shared triple-redundant latent. In paper terms, `D(1,2)` is not a causal quantity and not a PID estimator; it is a controlled dependence proxy used to validate whether the generator induces the intended cross-view geometry in the observations. Accordingly, the expected U/R signatures are low pairwise dependence for `U1/U2/U3`, pair-specific high dependence for `R12/R13/R23`, broad elevation for `R123`, monotonic growth with `rho`, and degradation as `sigma` increases.
 
 ### 2.2 PCA-Based Geometric Intuition
 
 For a fixed atom, let `X_k` denote the matrix of samples from view `k`, and define the first principal-component score as $z_k = \mathrm{PC1}(X_k)$ for $k\in\{1,2,3\}$.
 
-Scatter plots of `(z_i, z_j)` provide a qualitative geometric diagnostic:
-
-- unique atoms produce diffuse, weakly structured clouds,
-- redundant atoms produce aligned / elongated clouds due to shared latent structure.
-
-This diagnostic is especially useful for presentation and sanity checking because it makes the latent dependence geometry visually explicit.
+Scatter plots of `(z_i, z_j)` provide a qualitative geometric diagnostic: unique atoms produce diffuse, weakly structured clouds, while redundant atoms produce aligned or elongated clouds due to shared latent structure. This diagnostic is especially useful for presentation and sanity checking because it makes the latent dependence geometry visually explicit in a way that complements scalar dependence summaries such as `D(1,2)`.
 
 ## 3. Dataset Exploration (Figures with Equations and Interpretation)
 
@@ -206,7 +150,7 @@ The left panel links the redundancy mechanism directly to the data statistics: b
 
 ![U/R PCA intuition scatter plots](test_outputs/pid_sar3/ur_intuition_scatter_examples.png)
 
-These plots visualize the first principal-component scores $z_k=\mathrm{PC1}(X_k)$ and scatter paired scores $(z_1,z_2)$ for the same samples. They are not estimators of PID quantities, but they are highly interpretable geometric diagnostics. For `U1`, the cloud is diffuse because view 2 is largely noise. For `R12`, the cloud becomes elongated/aligned because views 1 and 2 share a latent component. For `R123`, alignment is also visible because both views inherit the triple-redundant latent. Increasing $\sigma$ broadens the clouds and weakens visible alignment. Because PCA signs are arbitrary, slope direction may flip across runs; the presence and magnitude of alignment are the meaningful features.
+These plots visualize the first principal-component scores $z_k=\mathrm{PC1}(X_k)$ and scatter paired scores $(z_1,z_2)$ for the same samples. They are not estimators of PID quantities, but they are highly interpretable geometric diagnostics. The useful reading strategy is to compare the *shape* of the cloud and the *magnitude* of the panel correlation, not the sign of the slope. In the currently generated figure (same code path and seeds as the test), the low-noise row (`sigma = 0.15`) shows a near-zero association for `U1` (approximately $|r| \approx 0.016$), while `R12` and `R123` show visibly stronger alignment (approximately $|r| \approx 0.218$ and $|r| \approx 0.274$, respectively). In the high-noise row (`sigma = 0.9`), the `R12` panel still retains a visible dependence signal (approximately $|r| \approx 0.137$), whereas `U1` remains near zero (approximately $|r| \approx 0.003$) and `R123` may collapse toward the noise floor in this particular projection/view pair (approximately $|r| \approx 0.007$), which is a useful reminder that PCA is a low-dimensional diagnostic of one pair of views rather than a complete summary of the atom. Because PCA signs are arbitrary, slope direction may flip across runs; the presence and magnitude of alignment are the meaningful features.
 
 ## 4. Code Tutorial (How the Dataset Is Implemented and Used)
 
@@ -214,12 +158,7 @@ This section maps the formal definition to the actual code.
 
 ### 4.1 Instantiate the Generator
 
-`PIDSar3DatasetGenerator` encapsulates:
-
-- fixed projection sampling,
-- fixed synergy MLP sampling,
-- de-leakage fitting,
-- per-sample generation and batch generation.
+`PIDSar3DatasetGenerator` encapsulates fixed projection sampling, fixed synergy MLP sampling, de-leakage fitting, and per-sample / batch generation.
 
 Minimal example:
 
@@ -292,16 +231,7 @@ np.savez_compressed("data/pid_sar3_ur_train.npz", **batch)
 
 ### 4.5 Where the Diagnostics Are Implemented
 
-The main U/R plots are produced by these test functions in `tests/test_pid_sar3_dataset.py`:
-
-- `test_plot_atom_gain_controls_ur()`
-- `test_plot_pid_metadata_distributions()`
-- `test_plot_pid_dependence_distributions_boxplots()`
-- `test_plot_ur_compact_signature_grid_over_sigma()`
-- `test_plot_ur_hyperparameter_sweeps_compact()`
-- `test_plot_ur_intuition_scatter_examples()`
-
-These functions are written as tests so they can serve both as regression checks and as reproducible figure generation scripts.
+The main U/R plots are produced by `test_plot_atom_gain_controls_ur()`, `test_plot_pid_metadata_distributions()`, `test_plot_pid_dependence_distributions_boxplots()`, `test_plot_ur_compact_signature_grid_over_sigma()`, `test_plot_ur_hyperparameter_sweeps_compact()`, and `test_plot_ur_intuition_scatter_examples()` in `tests/test_pid_sar3_dataset.py`. These functions are written as tests so they can serve both as regression checks and as reproducible figure-generation scripts.
 
 ## 5. Commands to Reproduce the Dataset and Figures
 
@@ -328,14 +258,7 @@ print("Saved plots under test_outputs/pid_sar3")
 PY
 ```
 
-Output figures:
-
-- `test_outputs/pid_sar3/atom_gain_controls_ur.png`
-- `test_outputs/pid_sar3/pid_metadata_distributions.png`
-- `test_outputs/pid_sar3/pid_dependence_distributions_boxplots.png`
-- `test_outputs/pid_sar3/ur_compact_signature_grid_over_sigma.png`
-- `test_outputs/pid_sar3/ur_hyperparameter_sweeps_compact.png`
-- `test_outputs/pid_sar3/ur_intuition_scatter_examples.png`
+This command generates `test_outputs/pid_sar3/atom_gain_controls_ur.png`, `test_outputs/pid_sar3/pid_metadata_distributions.png`, `test_outputs/pid_sar3/pid_dependence_distributions_boxplots.png`, `test_outputs/pid_sar3/ur_compact_signature_grid_over_sigma.png`, `test_outputs/pid_sar3/ur_hyperparameter_sweeps_compact.png`, and `test_outputs/pid_sar3/ur_intuition_scatter_examples.png`.
 
 ### 5.2 Generate and Save a Balanced U/R Dataset (`.npz`)
 
@@ -409,172 +332,12 @@ make_split("data/pid_sar3_ur_test.npz",  1000)
 PY
 ```
 
-## 6. Explanatory Figures and Intuitive Analysis (U/R Focus)
+## 6. Suggested Paper-Style Writeup Snippets
 
-This section explains the key concepts using the generated figures.
-
-### 6.1 Figure A: Atom Gain Controls (Amplifying U vs R Unequally)
-
-File:
-
-- `test_outputs/pid_sar3/atom_gain_controls_ur.png`
-
-![Atom gain controls for U/R](test_outputs/pid_sar3/atom_gain_controls_ur.png)
-
-What it shows:
-
-- `baseline`: default gains (`unique_gain=1`, `redundancy_gain=1`)
-- `boost_U`: increased signal amplitude only for unique atoms
-- `boost_R`: increased signal amplitude only for redundancy atoms
-- `unequal_R`: per-`pid` overrides (e.g., stronger `R12`, weaker `R123`)
-
-How to read it:
-
-- left panel tracks how gain controls change observed scale (mean `||x1||`),
-- right panel tracks how gain controls change dependence (`D(1,2)`),
-- boosting redundancy should raise `D(1,2)` for `R12` more than for `U1`,
-- per-`pid` overrides let you create unequal difficulty within the same atom family.
-
-Why this matters:
-
-- this gives a direct mechanism to create stress tests (e.g., "strong unique, weak redundancy" or "dominant `R12` but weak `R123`") and examine how objectives behave under controlled imbalance.
-
-### 6.2 Figure B: PID Metadata Distributions (Sanity Check)
-
-File:
-
-- `test_outputs/pid_sar3/pid_metadata_distributions.png`
-
-![PID metadata distributions](test_outputs/pid_sar3/pid_metadata_distributions.png)
-
-What it shows:
-
-- balanced counts across all `pid_id` values (when using a balanced generation schedule),
-- per-`pid` distributions of `alpha`,
-- `rho` support only for redundancy atoms (`R12`, `R13`, `R23`, `R123`),
-- `hop` support only for synergy atoms (`S12->3`, `S13->2`, `S23->1`).
-
-Why this matters:
-
-- it verifies that the generator metadata are sampled as intended and that atom-specific parameters are activated only in the relevant atom families.
-
-### 6.3 Figure C: PID Dependence Distributions (Repeated-Batch Variability)
-
-File:
-
-- `test_outputs/pid_sar3/pid_dependence_distributions_boxplots.png`
-
-![PID dependence distributions](test_outputs/pid_sar3/pid_dependence_distributions_boxplots.png)
-
-What it shows:
-
-- boxplots of pairwise dependence proxies across repeated mini-batches for each `pid`,
-- variability around the expected signatures, not just mean values.
-
-How to read it:
-
-- in `D(1,2)`, `R12` should dominate and `R123` should also be elevated,
-- in `D(1,3)`, `R13` should dominate and `R123` should also be elevated,
-- in `D(2,3)`, `R23` should dominate and `R123` should also be elevated,
-- `U1/U2/U3` should stay near the noise floor in all three panels.
-
-Why this matters:
-
-- it demonstrates robustness of the intended dependence topology across repeated sampling, which is useful for substantiating claims in the text.
-
-### 6.4 Figure D: U/R Signature Grid Across Noise
-
-File:
-
-- `test_outputs/pid_sar3/ur_compact_signature_grid_over_sigma.png`
-
-![U/R signature grid over sigma](test_outputs/pid_sar3/ur_compact_signature_grid_over_sigma.png)
-
-What it shows:
-
-- Rows are atoms (`U1,U2,U3,R12,R13,R23,R123`).
-- Columns are pairwise dependence proxies (`D(1,2)`, `D(1,3)`, `D(2,3)`).
-- Three panels correspond to different noise levels `sigma`.
-
-How to read it:
-
-- `U1/U2/U3` rows should remain low across all pairs (no shared signal).
-- `R12` should be bright mainly in `D(1,2)`.
-- `R13` should be bright mainly in `D(1,3)`.
-- `R23` should be bright mainly in `D(2,3)`.
-- `R123` should be elevated in all three columns.
-- As `sigma` increases, all values typically compress toward the noise floor.
-
-Why this is useful:
-
-- It is a single compact sanity-check that immediately reveals whether the generator is producing the intended dependence topology.
-
-### 6.5 Figure E: Hyperparameter Sweeps (`rho`, `sigma`, `alpha`)
-
-File:
-
-- `test_outputs/pid_sar3/ur_hyperparameter_sweeps_compact.png`
-
-![U/R hyperparameter sweeps](test_outputs/pid_sar3/ur_hyperparameter_sweeps_compact.png)
-
-Left panel (redundancy overlap):
-
-- For `R12`, the dependence proxy $D(x_1,x_2)$ should increase with $\rho$.
-- Multiple curves at different `sigma` show that noise weakens observed dependence but preserves the monotonic trend.
-
-Right panel (signal amplitude and noise):
-
-- Mean $\|x_1\|_2$ increases as `alpha` increases.
-- Larger `sigma` shifts norms upward and broadens the effective scale (signal + noise).
-- Comparing `U1` and `R123` shows the effect under two different atom structures.
-
-Why this is useful:
-
-- It ties abstract hyperparameters to direct geometric/statistical effects in the observed data.
-
-### 6.6 Figure F: PCA Intuition Scatter Plots (What You Liked)
-
-File:
-
-- `test_outputs/pid_sar3/ur_intuition_scatter_examples.png`
-
-![U/R PCA intuition scatter plots](test_outputs/pid_sar3/ur_intuition_scatter_examples.png)
-
-Construction:
-
-- For each atom (`U1`, `R12`, `R123`) and noise level (`sigma=0.15`, `sigma=0.9`), compute:
-  - `PC1(x1)` across samples,
-  - `PC1(x2)` across samples,
-  - scatter the paired scores for the same datapoints.
-
-Interpretation:
-
-- `U1`:
-  - signal is only in view 1,
-  - `x2` is mostly noise,
-  - the scatter is diffuse with weak structure.
-- `R12`:
-  - both views contain overlapping latent structure,
-  - the scatter becomes elongated/aligned,
-  - stronger apparent coupling is visible.
-- `R123`:
-  - `x1` and `x2` both inherit a shared latent factor (plus view-specific perturbation),
-  - alignment remains visible, though the geometry differs from `R12`.
-- Increasing `sigma`:
-  - broadens all point clouds,
-  - weakens visible alignment and correlation magnitude.
-
-Important caveat (PCA sign ambiguity):
-
-- The sign of a principal component is arbitrary, so the slope can flip between runs.
-- The presence/absence of alignment and the magnitude of association are the meaningful signals.
-
-## 7. Suggested Paper-Style Writeup Snippets
-
-### 7.1 Methods (Dataset)
+### 6.1 Methods (Dataset)
 
 We generate a synthetic three-view dataset in which each sample contains exactly one information atom from a predefined PID-inspired atom set. Let $x_1,x_2,x_3 \in \mathbb{R}^d$ denote the observed views. For each view and atom-specific component, we sample a fixed projection matrix $P_k^{(c)} \in \mathbb{R}^{d\times m}$ at dataset initialization. Unique atoms are generated by projecting a latent Gaussian vector into a single view, while redundant atoms are generated by mixing a shared latent Gaussian factor with view-specific Gaussian perturbations using an overlap coefficient $\rho$. All observations include additive isotropic Gaussian noise with scale $\sigma$, and signal amplitude is modulated by a per-sample scalar $\alpha$. This construction provides explicit control over dependence topology (unique, pairwise redundancy, and triple redundancy) and signal-to-noise conditions.
 
-### 7.2 Results (U/R Sanity Checks)
+### 6.2 Results (U/R Sanity Checks)
 
 On the U/R subset, pairwise dependence heatmaps recover the intended atom structure: unique atoms remain near the noise floor across all pairwise dependencies, pairwise redundant atoms activate the corresponding view pair, and triple redundancy elevates all pairwise dependencies. PCA-based scatter plots of $(\mathrm{PC1}(x_1),\mathrm{PC1}(x_2))$ provide an intuitive geometric corroboration: unique atoms appear as diffuse clouds, whereas redundant atoms exhibit aligned low-dimensional structure whose visibility degrades gracefully as the observation noise $\sigma$ increases.

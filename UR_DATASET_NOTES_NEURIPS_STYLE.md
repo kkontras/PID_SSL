@@ -15,272 +15,261 @@ Reference implementation:
 
 ### 1.1 Dataset Overview and Notation
 
-PID-SAR-3++ is a synthetic three-view benchmark for evaluating multi-view representation learning under controlled information structure. Each sample contains three observations
+PID-SAR-3++ is a synthetic three-view benchmark for evaluating multi-view representation learning under controlled information structure. Each sample consists of three observations:
 
-$$
-x_1, x_2, x_3 \in \mathbb{R}^d,
-$$
+```math
+x_1, x_2, x_3 \in \mathbb{R}^d.
+```
 
-and is generated so that **exactly one PID-inspired information atom** is active per sample. The atom families are:
+Exactly one PID-inspired information atom is active per sample. The atom families are Unique (`U`), Redundancy (`R`), and Directional Synergy (`S`), and the full atom set is:
 
-$$
-\text{Unique} \ (U), \qquad \text{Redundancy} \ (R), \qquad \text{Directional Synergy} \ (S).
-$$
-
-The full atom set is:
-
-$$
+```math
 \mathcal{A} = \{U_1,U_2,U_3,R_{12},R_{13},R_{23},R_{123},S_{12 \to 3},S_{13 \to 2},S_{23 \to 1}\}.
-$$
+```
 
-Each sample is annotated with a categorical atom identifier $\mathrm{pid\_id}\in\{0,\dots,9\}$ (used for evaluation only, not for SSL training).
+Each sample is annotated with a categorical atom identifier `pid_id ∈ {0,…,9}` used for evaluation only (not for SSL training).
 
-The generator returns the tuple:
+The generator returns:
 
-$$
-(x_1,x_2,x_3,\texttt{pid\_id},\alpha,\sigma,\rho,h),
-$$
+```math
+(x_1,x_2,x_3,\mathrm{pid\_id},\alpha,\sigma,\rho,h),
+```
 
-where $\alpha$ is the signal amplitude, $\sigma$ is the observation noise scale, $\rho$ is the redundancy overlap parameter (undefined for non-redundancy atoms; represented as `-1` in code), and $h$ is the synergy depth parameter (undefined for non-synergy atoms; represented as `0` in code).
+where `alpha` is the signal amplitude, `sigma` is the observation noise scale, `rho` is the redundancy overlap parameter (undefined for non-redundancy atoms; encoded as `-1`), and `h` is the synergy depth parameter (undefined for non-synergy atoms; encoded as `0`).
 
-### 1.2 Task Definition and Evaluation Objective
+### 1.2 Task Definition (Training and Evaluation Protocol)
 
-The benchmark is designed for the following training/evaluation protocol.
+Training protocol:
 
-Training input:
+- the learner receives only the three views `(x1, x2, x3)`,
+- the learner does not receive `pid_id`, `rho`, or `h`,
+- a multi-view self-supervised objective is trained on the observations.
 
-- the learner observes only $(x_1,x_2,x_3)$;
-- the learner does not receive $\mathrm{pid\_id}$, $\rho$, or $h$.
+Evaluation protocol:
 
-Evaluation objective:
+- encoders are frozen after training,
+- representations are evaluated for retention of unique, redundant, and directional-synergistic structure.
 
-- train a multi-view self-supervised objective on the generated observations;
-- freeze the learned encoders;
-- evaluate whether the resulting representations preserve the intended information structure (unique, redundant, and directional synergistic components).
+Generator-level validation (before training encoders):
 
-Generator validation (pre-model):
+- evaluate raw observations using dependence and synergy proxies,
+- verify that signatures match the intended atom-level structure.
 
-- prior to encoder training, one validates the generator directly on raw observations using dependence and synergy proxy metrics;
-- in this document, the emphasis is on the U/R subset because it provides the simplest and most interpretable sanity checks.
+This note emphasizes the `U/R` subset first because it provides the most interpretable sanity checks.
 
 ### 1.3 Generative Parameters
 
-The latent dimensionality satisfies $m \ll d$. Typical defaults used in the current implementation are:
+The latent dimensionality satisfies `m << d`. Typical defaults are:
 
-$$
-d = 32,\qquad m = 8,
-$$
-$$
-\alpha \sim \mathrm{Uniform}(\alpha_{\min}, \alpha_{\max}),\qquad \sigma > 0,
-$$
-$$
+```math
+d = 32,\qquad m = 8.
+```
+
+```math
+\alpha \sim \mathrm{Uniform}(\alpha_{\min}, \alpha_{\max}),\qquad \sigma > 0.
+```
+
+```math
 \rho \in \mathcal{R}\subset(0,1),\qquad h \in \mathcal{H}\subset\mathbb{N}.
-$$
+```
 
 Default values in `pid_sar3_dataset.py`:
 
-- $\alpha_{\min}=0.8,\ \alpha_{\max}=1.2$
-- $\mathcal{R}=\{0.2, 0.5, 0.8\}$
-- $\mathcal{H}=\{1,2,3,4\}$
+- `alpha_min = 0.8`, `alpha_max = 1.2`
+- `R = {0.2, 0.5, 0.8}` (implemented as `rho_choices`)
+- `H = {1,2,3,4}` (implemented as `hop_choices`)
 
-### 1.4 Fixed Projection Operators (Sampled Once Per Dataset Seed)
+### 1.4 Fixed Projection Operators (Sampled Once per Dataset Seed)
 
-For each view $k \in \{1,2,3\}$ and each component $c$, a fixed projection matrix is sampled:
+For each view `k ∈ {1,2,3}` and each component `c`, the generator samples a fixed projection matrix:
 
-$$
-P_k^{(c)} \in \mathbb{R}^{d \times m},
-\qquad
-P_k^{(c)}[i,j] \sim \mathcal{N}(0,1/d).
-$$
+```math
+P_k^{(c)} \in \mathbb{R}^{d \times m},\qquad P_k^{(c)}[i,j] \sim \mathcal{N}(0,1/d).
+```
 
-Columns are normalized:
+Each column is normalized:
 
-$$
-P_k^{(c)}[:,j] \leftarrow \frac{P_k^{(c)}[:,j]}{\left\|P_k^{(c)}[:,j]\right\|_2}.
-$$
+```math
+P_k^{(c)}[:,j] \leftarrow \frac{P_k^{(c)}[:,j]}{\|P_k^{(c)}[:,j]\|_2}.
+```
 
-These matrices are sampled once per dataset seed and then held fixed. Consequently, inter-sample variation is attributable only to latent draws, amplitudes, and observation noise.
+These operators are held fixed for all samples generated with the same dataset seed.
 
 ### 1.5 Observation Noise
 
-All views receive additive isotropic Gaussian noise:
+Each view receives additive isotropic Gaussian noise:
 
-$$
-\varepsilon_k \sim \mathcal{N}(0,\sigma^2 I_d), \qquad k\in\{1,2,3\}.
-$$
+```math
+\varepsilon_k \sim \mathcal{N}(0,\sigma^2 I_d),\qquad k\in\{1,2,3\}.
+```
 
-The final observation is always of the form:
+The observed variable is:
 
-$$
-x_k = \text{signal}_k + \varepsilon_k.
-$$
+```math
+x_k = \mathrm{signal}_k + \varepsilon_k.
+```
 
 ### 1.6 Unique Atoms
 
-For $U_i$, sample
+For `U_i`, sample a latent Gaussian vector:
 
-$$
-u \sim \mathcal{N}(0,I_m),
-$$
+```math
+u \sim \mathcal{N}(0,I_m).
+```
 
-and define
+The active view receives the projected latent, while inactive views contain noise only:
 
-$$
-x_i = \alpha P_i^{(U_i)} u + \varepsilon_i,
-$$
-$$
-x_j = \varepsilon_j \quad \text{for } j\neq i.
-$$
+```math
+x_i = \alpha P_i^{(U_i)} u + \varepsilon_i.
+```
 
-This creates signal in exactly one view and noise-only observations in the other two.
+```math
+x_j = \varepsilon_j,\qquad j \neq i.
+```
 
 ### 1.7 Pairwise Redundancy Atoms
 
-For $R_{ij}$, sample
+For `R_{ij}`, sample:
 
-$$
-r,\eta_i,\eta_j \overset{\text{i.i.d.}}{\sim} \mathcal{N}(0,I_m),
-$$
+```math
+r,\eta_i,\eta_j \overset{\mathrm{i.i.d.}}{\sim} \mathcal{N}(0,I_m).
+```
 
-and define noisy shared latents
+Construct view-specific latent realizations with overlap coefficient `rho`:
 
-$$
-r_i = \sqrt{\rho}\,r + \sqrt{1-\rho}\,\eta_i,
-\qquad
+```math
+r_i = \sqrt{\rho}\,r + \sqrt{1-\rho}\,\eta_i,\qquad
 r_j = \sqrt{\rho}\,r + \sqrt{1-\rho}\,\eta_j.
-$$
+```
 
-Then
+Then generate the observations:
 
-$$
-x_i = \alpha P_i^{(R_{ij})} r_i + \varepsilon_i,
-$$
-$$
-x_j = \alpha P_j^{(R_{ij})} r_j + \varepsilon_j,
-$$
-$$
-x_k = \varepsilon_k \quad \text{for } k \notin \{i,j\}.
-$$
+```math
+x_i = \alpha P_i^{(R_{ij})} r_i + \varepsilon_i,\qquad
+x_j = \alpha P_j^{(R_{ij})} r_j + \varepsilon_j.
+```
 
-The overlap parameter $\rho$ controls the strength of shared structure between the two active views.
+```math
+x_k = \varepsilon_k,\qquad k\notin\{i,j\}.
+```
+
+As `rho` increases, shared structure between the active views becomes stronger.
 
 ### 1.8 Triple Redundancy Atom
 
-For $R_{123}$, sample
+For `R_{123}`, sample:
 
-$$
-r,\eta_1,\eta_2,\eta_3 \overset{\text{i.i.d.}}{\sim} \mathcal{N}(0,I_m),
-$$
+```math
+r,\eta_1,\eta_2,\eta_3 \overset{\mathrm{i.i.d.}}{\sim} \mathcal{N}(0,I_m).
+```
 
-and set
+Define per-view redundant latents:
 
-$$
+```math
 r_k = \sqrt{\rho}\,r + \sqrt{1-\rho}\,\eta_k,\qquad k\in\{1,2,3\}.
-$$
+```
 
-Then
+Then:
 
-$$
+```math
 x_k = \alpha P_k^{(R_{123})} r_k + \varepsilon_k,\qquad k\in\{1,2,3\}.
-$$
-
-This induces shared structure across all three views.
+```
 
 ### 1.9 Directional Synergy Atoms
 
-For $S_{ij\to k}$, sample
+For `S_{ij→k}`, sample source latents and a hop parameter:
 
-$$
-a,b \sim \mathcal{N}(0,I_m), \qquad h \in \mathcal{H}.
-$$
+```math
+a,b \sim \mathcal{N}(0,I_m),\qquad h \in \mathcal{H}.
+```
 
-Source views receive linearly projected latents:
+Source views are generated linearly:
 
-$$
+```math
 x_i = \alpha P_i^{(A_{ij})} a + \varepsilon_i,\qquad
 x_j = \alpha P_j^{(B_{ij})} b + \varepsilon_j.
-$$
+```
 
-The target view is generated from a fixed nonlinear readout network $\phi_h$:
+A fixed nonlinear readout network `phi_h` produces a target latent:
 
-$$
-s_0 = \phi_h([a,b]) \in \mathbb{R}^m,
-$$
+```math
+s_0 = \phi_h([a,b]) \in \mathbb{R}^m.
+```
 
-followed by de-leakage via precomputed linear maps $C_a^{(h)}, C_b^{(h)}$:
+The latent is de-leaked using precomputed linear maps:
 
-$$
+```math
 s = s_0 - C_a^{(h)} a - C_b^{(h)} b.
-$$
+```
 
-Finally,
+The target view is then:
 
-$$
+```math
 x_k = \alpha P_k^{(\mathrm{SYN}_{ij})} s + \varepsilon_k.
-$$
+```
 
-The de-leakage step suppresses single-source linear predictability in the target latent $s$, making the synergy structure more directional and harder to explain with single-view probes.
+This construction reduces single-source linear leakage and yields a more directional synergy signal.
 
-### 1.10 Synergy De-leakage Fitting (Offline, Per Dataset Seed)
+### 1.10 Synergy De-leakage Fit (Offline, per Dataset Seed)
 
-For each hop $h$, de-leakage maps are fit from synthetic latent samples by least squares:
+For each hop `h`, de-leakage maps are fit by ridge regression on synthetic latent samples:
 
-$$
-W^{(h)} = \arg\min_W \| S_0 - XW \|_F^2 + \lambda \|W\|_F^2,
-$$
+```math
+W^{(h)} = \arg\min_W \|S_0 - XW\|_F^2 + \lambda \|W\|_F^2,
+```
 
-where
+with
 
-$$
-X = [A \; B] \in \mathbb{R}^{N \times 2m},\qquad S_0 \in \mathbb{R}^{N \times m}.
-$$
+```math
+X = [A\;B] \in \mathbb{R}^{N\times 2m},\qquad S_0 \in \mathbb{R}^{N\times m}.
+```
 
-The solution is partitioned as
+The fitted matrix is partitioned as:
 
-$$
+```math
 W^{(h)} =
 \begin{bmatrix}
 C_a^{(h)} \\
 C_b^{(h)}
-\end{bmatrix},
-$$
+\end{bmatrix}.
+```
 
-which yields the de-leakage correction used during sample generation.
+These maps are then used during generation to compute the de-leaked target latent `s`.
 
-## 2. Validation Metrics (Raw Data, Before Any SSL Model)
+## 2. Validation Metrics (Raw Data, Pre-Encoder)
 
 ### 2.1 Symmetric Dependence Proxy
 
-Given two view matrices $X_A, X_B$ (rows are samples), define:
+Given two view matrices `X_A` and `X_B` (rows are samples), define:
 
-$$
-D(X_A, X_B) = \frac{1}{2}\left(R^2(X_A \to X_B) + R^2(X_B \to X_A)\right),
-$$
+```math
+D(X_A, X_B)=\frac{1}{2}\left(R^2(X_A\to X_B) + R^2(X_B\to X_A)\right),
+```
 
-where $R^2$ is computed using ridge regression on a train/test split.
+where each `R^2` is computed using ridge regression on a train/test split.
 
-Expected U/R signatures:
+Expected `U/R` signatures:
 
-- `U1/U2/U3`: low pairwise dependence,
-- `Rij`: high dependence only for the matching pair,
-- `R123`: elevated dependence for all pairs,
-- dependence increases with $\rho$,
-- dependence decreases with larger $\sigma$.
+- `U1/U2/U3`: low pairwise dependence (near noise floor),
+- `R12/R13/R23`: high dependence only for the matching pair,
+- `R123`: elevated dependence across all three pairs,
+- dependence increases with `rho`,
+- dependence decreases as `sigma` increases.
 
-### 2.2 PCA-Based Intuition View
+### 2.2 PCA-Based Geometric Intuition
 
-For a fixed atom, compute principal-component scores for each view:
+For a fixed atom, let `X_k` denote the matrix of samples from view `k`. Define the first principal-component score:
 
-$$
-z_k = \mathrm{PC1}(X_k), \quad k\in\{1,2,3\}.
-$$
+```math
+z_k = \mathrm{PC1}(X_k),\qquad k\in\{1,2,3\}.
+```
 
-Scatter plots of $(z_i,z_j)$ reveal the dominant pairwise geometric structure:
+Scatter plots of `(z_i, z_j)` provide a qualitative geometric diagnostic:
 
-- diffuse clouds for unique atoms,
-- aligned/elongated manifolds for redundant atoms.
+- unique atoms produce diffuse, weakly structured clouds,
+- redundant atoms produce aligned / elongated clouds due to shared latent structure.
 
-This diagnostic is qualitative but highly interpretable and is useful for presentations and sanity checks.
+This diagnostic is especially useful for presentation and sanity checking because it makes the latent dependence geometry visually explicit.
 
 ## 3. Code Tutorial (How the Dataset Is Implemented and Used)
 
@@ -327,9 +316,9 @@ print(sample["pid_id"])    # 3
 
 The U/R-only subset corresponds to:
 
-$$
+```math
 \{0,1,2,3,4,5,6\} = \{U_1,U_2,U_3,R_{12},R_{13},R_{23},R_{123}\}.
-$$
+```
 
 ```python
 import numpy as np

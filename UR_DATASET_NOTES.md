@@ -654,6 +654,8 @@ Primary pair->target artifacts:
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_scores.csv`
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.png`
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_heatmaps.png`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1_heatmaps.png`
 
 ![Rotated pair->target downstream summary](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.png)
 
@@ -662,6 +664,10 @@ Primary pair->target artifacts:
 ![PID-by-rotation pair->target heatmaps](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_heatmaps.png)
 
 *Figure 13. Full `PID x rotation` pair->target downstream scores (`F1-skill`; random ≈ 0) for each method.*
+
+![All source->target macro-F1 heatmaps](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1_heatmaps.png)
+
+*Figure 14. All source->target rotations (`1/2/3/12/13/23/123 -> 1/2/3`) reported as macro-F1 for A-D (frozen encoders). Includes self-prediction rows such as `1->1` and cross-modal rows such as `2->1`.*
 
 #### Table 7. Rotated Pair->Target Downstream Results (frozen encoders, held-out test; primary report uses per-rotation macro-F1)
 
@@ -691,6 +697,40 @@ What this clarifies:
 - **ConFu fusion-head** is competitive and strongest on one rotation (`23->1`).
 - **Pairwise InfoNCE** is consistently strong and clearly above unimodal SimCLR on all three rotations.
 
+#### Table 7b. All Source->Target Rotations (macro-F1, A-D only)
+
+Source: `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
+
+| Source->Target | A | B | C | D |
+| --- | ---: | ---: | ---: | ---: |
+| `1->1` | 0.988 | 0.985 | 0.986 | 0.986 |
+| `2->1` | 0.513 | 0.610 | 0.609 | 0.592 |
+| `3->1` | 0.508 | 0.601 | 0.613 | 0.627 |
+| `12->1` | 0.984 | 0.982 | 0.981 | 0.983 |
+| `13->1` | 0.984 | 0.981 | 0.982 | 0.982 |
+| `23->1` | 0.515 | 0.628 | 0.643 | 0.647 |
+| `123->1` | 0.981 | 0.978 | 0.978 | 0.979 |
+| `1->2` | 0.513 | 0.612 | 0.611 | 0.581 |
+| `2->2` | 0.987 | 0.986 | 0.986 | 0.986 |
+| `3->2` | 0.512 | 0.632 | 0.621 | 0.585 |
+| `12->2` | 0.984 | 0.982 | 0.982 | 0.982 |
+| `13->2` | 0.516 | 0.649 | 0.655 | 0.599 |
+| `23->2` | 0.984 | 0.982 | 0.982 | 0.982 |
+| `123->2` | 0.981 | 0.979 | 0.979 | 0.979 |
+| `1->3` | 0.507 | 0.608 | 0.619 | 0.623 |
+| `2->3` | 0.510 | 0.620 | 0.616 | 0.590 |
+| `3->3` | 0.987 | 0.985 | 0.986 | 0.986 |
+| `12->3` | 0.517 | 0.640 | 0.653 | 0.640 |
+| `13->3` | 0.984 | 0.981 | 0.983 | 0.983 |
+| `23->3` | 0.984 | 0.982 | 0.982 | 0.983 |
+| `123->3` | 0.981 | 0.978 | 0.980 | 0.980 |
+
+Reading guide:
+
+- `1->1`, `2->2`, `3->3` are self-prediction sanity checks.
+- `2->1`, `3->1`, `1->2`, ... are single-modality cross-modal transfers.
+- `23->1`, `13->2`, `12->3` are the main rotated pair->target tasks from Table 7.
+
 Important note on the heuristic “applicable PID” averages:
 
 - We also computed a simple heuristic split of PID atoms into “applicable / non-applicable” for each rotation, but the averages are noisy and not yet a reliable primary metric.
@@ -716,7 +756,7 @@ Supplementary `y_*` classification artifacts:
 
 ![Tuned x123 downstream classification summary](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_x123_summary.png)
 
-*Figure 14. Supplementary diagnostic: frozen `x123` downstream proxy classification on latent `y_*` targets. Left: per-target `F1-skill`. Right: family-level macro `F1-skill` summaries (random ≈ 0).*
+*Figure 15. Supplementary diagnostic: frozen `x123` downstream proxy classification on latent `y_*` targets. Left: per-target `F1-skill`. Right: family-level macro `F1-skill` summaries (random ≈ 0).*
 
 #### Table 8. Tuned 600-Step `y_*` Downstream Classification Proxy Results (`x123`, held-out test)
 
@@ -772,7 +812,7 @@ Artifacts:
 
 ![Subset ablations on y-task classification families](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_subset_ablations.png)
 
-*Figure 15. Secondary ablations: frozen-feature downstream `y_*` classification family summaries (`F1-skill`) for modality subsets (`x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`).*
+*Figure 16. Secondary ablations: frozen-feature downstream `y_*` classification family summaries (`F1-skill`) for modality subsets (`x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`).*
 
 Key ablation pattern:
 

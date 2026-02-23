@@ -1,0 +1,85 @@
+model,model_label,source,target,macro_f1
+A_unimodal_simclr,A: 3x unimodal SimCLR,1,1,0.9877011548647511
+A_unimodal_simclr,A: 3x unimodal SimCLR,1,2,0.5132999295038649
+A_unimodal_simclr,A: 3x unimodal SimCLR,1,3,0.5069231114077231
+A_unimodal_simclr,A: 3x unimodal SimCLR,2,1,0.5132723163788504
+A_unimodal_simclr,A: 3x unimodal SimCLR,2,2,0.987248363965711
+A_unimodal_simclr,A: 3x unimodal SimCLR,2,3,0.5103261661107025
+A_unimodal_simclr,A: 3x unimodal SimCLR,3,1,0.5077776089049584
+A_unimodal_simclr,A: 3x unimodal SimCLR,3,2,0.5120063887769797
+A_unimodal_simclr,A: 3x unimodal SimCLR,3,3,0.9874843864970488
+A_unimodal_simclr,A: 3x unimodal SimCLR,12,1,0.9843294515447673
+A_unimodal_simclr,A: 3x unimodal SimCLR,12,2,0.9843409440028509
+A_unimodal_simclr,A: 3x unimodal SimCLR,12,3,0.5172421872312029
+A_unimodal_simclr,A: 3x unimodal SimCLR,13,1,0.984125004694663
+A_unimodal_simclr,A: 3x unimodal SimCLR,13,2,0.5163335134648572
+A_unimodal_simclr,A: 3x unimodal SimCLR,13,3,0.9837524811569326
+A_unimodal_simclr,A: 3x unimodal SimCLR,23,1,0.5152430066906061
+A_unimodal_simclr,A: 3x unimodal SimCLR,23,2,0.9838424418067481
+A_unimodal_simclr,A: 3x unimodal SimCLR,23,3,0.9839977043638514
+A_unimodal_simclr,A: 3x unimodal SimCLR,123,1,0.9806863133839366
+A_unimodal_simclr,A: 3x unimodal SimCLR,123,2,0.9806425379642629
+A_unimodal_simclr,A: 3x unimodal SimCLR,123,3,0.9807708840182078
+B_pairwise_infonce,B: pairwise InfoNCE,1,1,0.985467992388329
+B_pairwise_infonce,B: pairwise InfoNCE,1,2,0.6123676155565523
+B_pairwise_infonce,B: pairwise InfoNCE,1,3,0.608104227219104
+B_pairwise_infonce,B: pairwise InfoNCE,2,1,0.6096298381241602
+B_pairwise_infonce,B: pairwise InfoNCE,2,2,0.985824213913145
+B_pairwise_infonce,B: pairwise InfoNCE,2,3,0.6202689375398607
+B_pairwise_infonce,B: pairwise InfoNCE,3,1,0.6014245071732338
+B_pairwise_infonce,B: pairwise InfoNCE,3,2,0.6315912348057956
+B_pairwise_infonce,B: pairwise InfoNCE,3,3,0.9853034050446808
+B_pairwise_infonce,B: pairwise InfoNCE,12,1,0.9815071654859188
+B_pairwise_infonce,B: pairwise InfoNCE,12,2,0.9820282488347306
+B_pairwise_infonce,B: pairwise InfoNCE,12,3,0.6396708018687104
+B_pairwise_infonce,B: pairwise InfoNCE,13,1,0.9812436113618799
+B_pairwise_infonce,B: pairwise InfoNCE,13,2,0.6487727357792198
+B_pairwise_infonce,B: pairwise InfoNCE,13,3,0.9814318016696314
+B_pairwise_infonce,B: pairwise InfoNCE,23,1,0.62761493724008
+B_pairwise_infonce,B: pairwise InfoNCE,23,2,0.9824537379647477
+B_pairwise_infonce,B: pairwise InfoNCE,23,3,0.9822416572416263
+B_pairwise_infonce,B: pairwise InfoNCE,123,1,0.9781280094709959
+B_pairwise_infonce,B: pairwise InfoNCE,123,2,0.978901342824655
+B_pairwise_infonce,B: pairwise InfoNCE,123,3,0.9784164895743954
+C_triangle_exact,C: TRIANGLE exact,1,1,0.9860408925565719
+C_triangle_exact,C: TRIANGLE exact,1,2,0.6108682018589117
+C_triangle_exact,C: TRIANGLE exact,1,3,0.6194903761067944
+C_triangle_exact,C: TRIANGLE exact,2,1,0.6094307075181957
+C_triangle_exact,C: TRIANGLE exact,2,2,0.985919686487757
+C_triangle_exact,C: TRIANGLE exact,2,3,0.6160290240865502
+C_triangle_exact,C: TRIANGLE exact,3,1,0.6130124569885654
+C_triangle_exact,C: TRIANGLE exact,3,2,0.6211076130597691
+C_triangle_exact,C: TRIANGLE exact,3,3,0.9859148617887313
+C_triangle_exact,C: TRIANGLE exact,12,1,0.9814784025193672
+C_triangle_exact,C: TRIANGLE exact,12,2,0.9816078785872183
+C_triangle_exact,C: TRIANGLE exact,12,3,0.6534908489383051
+C_triangle_exact,C: TRIANGLE exact,13,1,0.9822174779128444
+C_triangle_exact,C: TRIANGLE exact,13,2,0.6547779713854415
+C_triangle_exact,C: TRIANGLE exact,13,3,0.982993685160869
+C_triangle_exact,C: TRIANGLE exact,23,1,0.6433173298006
+C_triangle_exact,C: TRIANGLE exact,23,2,0.9820576769148728
+C_triangle_exact,C: TRIANGLE exact,23,3,0.9820437509143299
+C_triangle_exact,C: TRIANGLE exact,123,1,0.9777136293848433
+C_triangle_exact,C: TRIANGLE exact,123,2,0.9785558285862184
+C_triangle_exact,C: TRIANGLE exact,123,3,0.9798271847451518
+D_confu_fusion_head,D: ConFu fusion-head,1,1,0.9863920753063843
+D_confu_fusion_head,D: ConFu fusion-head,1,2,0.5811896419723933
+D_confu_fusion_head,D: ConFu fusion-head,1,3,0.6234367984999108
+D_confu_fusion_head,D: ConFu fusion-head,2,1,0.5922203024266287
+D_confu_fusion_head,D: ConFu fusion-head,2,2,0.9860644126132135
+D_confu_fusion_head,D: ConFu fusion-head,2,3,0.5899605784833555
+D_confu_fusion_head,D: ConFu fusion-head,3,1,0.6269568173325083
+D_confu_fusion_head,D: ConFu fusion-head,3,2,0.5847210354196078
+D_confu_fusion_head,D: ConFu fusion-head,3,3,0.9856236311575374
+D_confu_fusion_head,D: ConFu fusion-head,12,1,0.9825646806159435
+D_confu_fusion_head,D: ConFu fusion-head,12,2,0.9823437346766619
+D_confu_fusion_head,D: ConFu fusion-head,12,3,0.6398223167544859
+D_confu_fusion_head,D: ConFu fusion-head,13,1,0.9824541948091979
+D_confu_fusion_head,D: ConFu fusion-head,13,2,0.5991552886965777
+D_confu_fusion_head,D: ConFu fusion-head,13,3,0.9829664601695427
+D_confu_fusion_head,D: ConFu fusion-head,23,1,0.6470560381424835
+D_confu_fusion_head,D: ConFu fusion-head,23,2,0.9818241581224606
+D_confu_fusion_head,D: ConFu fusion-head,23,3,0.9825821493256829
+D_confu_fusion_head,D: ConFu fusion-head,123,1,0.9790867703951992
+D_confu_fusion_head,D: ConFu fusion-head,123,2,0.9789505498159983
+D_confu_fusion_head,D: ConFu fusion-head,123,3,0.9795140958254839

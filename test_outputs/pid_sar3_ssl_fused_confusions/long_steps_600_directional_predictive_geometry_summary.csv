@@ -1,0 +1,2 @@
+model,overall_margin,mean_matched_rs_centroid_cos,mean_matched_rs_nc_acc,fam_margin_U,fam_margin_R,fam_margin_S
+E_directional_predictive_hybrid,0.04553821682929993,0.9787444472312927,0.6072916388511658,0.183138906955719,-0.0016004908829927444,-0.02921086736023426

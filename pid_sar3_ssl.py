@@ -32,6 +32,7 @@ class SSLTrainConfig:
     triangle_reg_weight: float = 0.15
     confu_pair_weight: float = 0.5
     confu_fused_weight: float = 0.5
+    directional_pred_weight: float = 0.5
 
 
 @dataclass
@@ -135,6 +136,14 @@ class TriModalSSLModel(nn.Module):
                 "x12_to_x3": FusionHead(cfg.projector_dim, cfg.projector_hidden_dim),
             }
         )
+        # Directional predictive heads on encoder representation space h (not projector z).
+        self.directional_heads = nn.ModuleDict(
+            {
+                "h23_to_h1": FusionHead(cfg.representation_dim, cfg.encoder_hidden_dim),
+                "h13_to_h2": FusionHead(cfg.representation_dim, cfg.encoder_hidden_dim),
+                "h12_to_h3": FusionHead(cfg.representation_dim, cfg.encoder_hidden_dim),
+            }
+        )
 
     def encode(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         return {k: self.encoders[k](batch[k]) for k in ("x1", "x2", "x3")}
@@ -152,6 +161,13 @@ class TriModalSSLModel(nn.Module):
             "to_x1": self.fusion_heads["x23_to_x1"](z["x2"], z["x3"]),
             "to_x2": self.fusion_heads["x13_to_x2"](z["x1"], z["x3"]),
             "to_x3": self.fusion_heads["x12_to_x3"](z["x1"], z["x2"]),
+        }
+
+    def predict_directional_h(self, h: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        return {
+            "to_h1": self.directional_heads["h23_to_h1"](h["x2"], h["x3"]),
+            "to_h2": self.directional_heads["h13_to_h2"](h["x1"], h["x3"]),
+            "to_h3": self.directional_heads["h12_to_h3"](h["x1"], h["x2"]),
         }
 
 
@@ -301,6 +317,9 @@ def ssl_objective_loss(
     confu_pair_weight: float = 0.5,
     confu_fused_weight: float = 0.5,
     fused: Optional[Dict[str, torch.Tensor]] = None,
+    h: Optional[Dict[str, torch.Tensor]] = None,
+    directional_preds: Optional[Dict[str, torch.Tensor]] = None,
+    directional_pred_weight: float = 0.5,
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
     if objective == "pairwise_simclr":
         l12 = _nt_xent_pair(z["x1"], z["x2"], temperature)
@@ -363,6 +382,35 @@ def ssl_objective_loss(
             "fuse_to_x3": float(lf3.detach().cpu()),
         }
         return loss, metrics
+    if objective == "directional_predictive_hybrid":
+        # Pairwise cross-modal contrastive baseline term on projector space.
+        l12 = _nt_xent_pair(z["x1"], z["x2"], temperature)
+        l13 = _nt_xent_pair(z["x1"], z["x3"], temperature)
+        l23 = _nt_xent_pair(z["x2"], z["x3"], temperature)
+        pair_loss = (l12 + l13 + l23) / 3.0
+
+        if h is None or directional_preds is None:
+            raise ValueError("directional_predictive_hybrid requires h and directional_preds")
+
+        # Directional prediction on h-space (targets stop-gradient by construction through detach()).
+        def _pred_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            pred_n = F.normalize(pred, dim=-1)
+            tgt_n = F.normalize(target.detach(), dim=-1)
+            return (1.0 - torch.sum(pred_n * tgt_n, dim=-1)).mean()
+
+        p1 = _pred_loss(directional_preds["to_h1"], h["x1"])
+        p2 = _pred_loss(directional_preds["to_h2"], h["x2"])
+        p3 = _pred_loss(directional_preds["to_h3"], h["x3"])
+        pred_loss = (p1 + p2 + p3) / 3.0
+        loss = pair_loss + directional_pred_weight * pred_loss
+        metrics = {
+            "pair_loss": float(pair_loss.detach().cpu()),
+            "directional_pred_loss": float(pred_loss.detach().cpu()),
+            "pred_23_to_1": float(p1.detach().cpu()),
+            "pred_13_to_2": float(p2.detach().cpu()),
+            "pred_12_to_3": float(p3.detach().cpu()),
+        }
+        return loss, metrics
     raise ValueError(f"Unknown objective: {objective}")
 
 
@@ -397,8 +445,14 @@ def train_ssl(
         batch_t = numpy_batch_to_torch(batch_np, device=str(device))
         _, z = model(batch_t)
         fused = None
+        directional_preds = None
         if cfg.objective == "confu_style" and hasattr(model, "fuse_projected"):
             fused = model.fuse_projected(z)  # type: ignore[attr-defined]
+        if cfg.objective == "directional_predictive_hybrid" and hasattr(model, "predict_directional_h"):
+            h_for_pred = model.encode(batch_t)  # recompute h for clarity in objective branch
+            directional_preds = model.predict_directional_h(h_for_pred)  # type: ignore[attr-defined]
+        else:
+            h_for_pred = None
         loss, parts = ssl_objective_loss(
             z,
             objective=cfg.objective,
@@ -407,6 +461,9 @@ def train_ssl(
             confu_pair_weight=cfg.confu_pair_weight,
             confu_fused_weight=cfg.confu_fused_weight,
             fused=fused,
+            h=h_for_pred,
+            directional_preds=directional_preds,
+            directional_pred_weight=cfg.directional_pred_weight,
         )
 
         opt.zero_grad(set_to_none=True)

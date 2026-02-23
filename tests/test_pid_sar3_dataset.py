@@ -866,92 +866,103 @@ def test_plot_single_atom_correctness_validation():
     and verify that the atom-aligned tasks are near-ceiling while control probes remain low.
     """
     out_dir = _ensure_plot_dir()
-    cfg = PIDDatasetConfig(
-        d=32,
-        m=8,
-        sigma=0.05,
-        alpha_min=1.5,
-        alpha_max=1.5,
-        rho_choices=(0.8,),
-        hop_choices=(2,),
-        seed=1300,
-        deleakage_fit_samples=1536,
-    )
-    gen = PIDSar3DatasetGenerator(cfg)
 
-    rows = []
+    def _collect_rows_for_sigma(sigma: float, seed: int) -> Tuple[List[Dict[str, float]], Dict[str, float]]:
+        cfg = PIDDatasetConfig(
+            d=32,
+            m=8,
+            sigma=sigma,
+            alpha_min=1.5,
+            alpha_max=1.5,
+            rho_choices=(0.8,),
+            hop_choices=(2,),
+            seed=seed,
+            deleakage_fit_samples=1536,
+        )
+        gen = PIDSar3DatasetGenerator(cfg)
+        local_rows: List[Dict[str, float]] = []
+        checks: Dict[str, float] = {}
 
-    # U1-only correctness: x1 should decode y_u1 almost perfectly, x2/x3 should not.
-    b_u1 = gen.generate(n=1200, pid_ids=[0] * 1200, return_aux=True)
-    y_u1 = b_u1["y_u1"]
-    u1_x1 = _linear_r2_scalar(b_u1["x1"], y_u1)
-    u1_x2 = _linear_r2_scalar(b_u1["x2"], y_u1)
-    u1_x3 = _linear_r2_scalar(b_u1["x3"], y_u1)
-    rows.extend(
-        [
-            {"atom": "U1", "metric": "R2(y_u1 | x1)", "score": float(u1_x1)},
-            {"atom": "U1", "metric": "R2(y_u1 | x2) control", "score": float(u1_x2)},
-            {"atom": "U1", "metric": "R2(y_u1 | x3) control", "score": float(u1_x3)},
-        ]
-    )
+        # U1-only correctness
+        b_u1 = gen.generate(n=1200, pid_ids=[0] * 1200, return_aux=True)
+        y_u1 = b_u1["y_u1"]
+        u1_x1 = _linear_r2_scalar(b_u1["x1"], y_u1)
+        u1_x2 = _linear_r2_scalar(b_u1["x2"], y_u1)
+        u1_x3 = _linear_r2_scalar(b_u1["x3"], y_u1)
+        checks.update({"u1_x1": u1_x1, "u1_x2": u1_x2, "u1_x3": u1_x3})
+        local_rows.extend(
+            [
+                {"atom": "U1", "metric": "R2(y_u1 | x1)", "score": float(u1_x1)},
+                {"atom": "U1", "metric": "R2(y_u1 | x2) control", "score": float(u1_x2)},
+                {"atom": "U1", "metric": "R2(y_u1 | x3) control", "score": float(u1_x3)},
+            ]
+        )
 
-    # R12-only correctness: x1/x2 should decode y_r12, x3 should be a control, joint should be best.
-    b_r12 = gen.generate(n=1200, pid_ids=[3] * 1200, return_aux=True)
-    y_r12 = b_r12["y_r12"]
-    r12_x1 = _linear_r2_scalar(b_r12["x1"], y_r12)
-    r12_x2 = _linear_r2_scalar(b_r12["x2"], y_r12)
-    r12_x3 = _linear_r2_scalar(b_r12["x3"], y_r12)
-    r12_x12 = _linear_r2_scalar(np.concatenate([b_r12["x1"], b_r12["x2"]], axis=1), y_r12)
-    rows.extend(
-        [
-            {"atom": "R12", "metric": "R2(y_r12 | x1)", "score": float(r12_x1)},
-            {"atom": "R12", "metric": "R2(y_r12 | x2)", "score": float(r12_x2)},
-            {"atom": "R12", "metric": "R2(y_r12 | x3) control", "score": float(r12_x3)},
-            {"atom": "R12", "metric": "R2(y_r12 | [x1,x2])", "score": float(r12_x12)},
-            {"atom": "R12", "metric": "joint gain over best single", "score": float(r12_x12 - max(r12_x1, r12_x2))},
-        ]
-    )
+        # R12-only correctness
+        b_r12 = gen.generate(n=1200, pid_ids=[3] * 1200, return_aux=True)
+        y_r12 = b_r12["y_r12"]
+        r12_x1 = _linear_r2_scalar(b_r12["x1"], y_r12)
+        r12_x2 = _linear_r2_scalar(b_r12["x2"], y_r12)
+        r12_x3 = _linear_r2_scalar(b_r12["x3"], y_r12)
+        r12_x12 = _linear_r2_scalar(np.concatenate([b_r12["x1"], b_r12["x2"]], axis=1), y_r12)
+        checks.update({"r12_x1": r12_x1, "r12_x2": r12_x2, "r12_x3": r12_x3, "r12_x12": r12_x12})
+        local_rows.extend(
+            [
+                {"atom": "R12", "metric": "R2(y_r12 | x1)", "score": float(r12_x1)},
+                {"atom": "R12", "metric": "R2(y_r12 | x2)", "score": float(r12_x2)},
+                {"atom": "R12", "metric": "R2(y_r12 | x3) control", "score": float(r12_x3)},
+                {"atom": "R12", "metric": "R2(y_r12 | [x1,x2])", "score": float(r12_x12)},
+                {"atom": "R12", "metric": "joint gain over best single", "score": float(r12_x12 - max(r12_x1, r12_x2))},
+            ]
+        )
 
-    # R123-only correctness: all views should decode y_r123, all-view joint should be strongest.
-    b_r123 = gen.generate(n=1200, pid_ids=[6] * 1200, return_aux=True)
-    y_r123 = b_r123["y_r123"]
-    r123_x1 = _linear_r2_scalar(b_r123["x1"], y_r123)
-    r123_x2 = _linear_r2_scalar(b_r123["x2"], y_r123)
-    r123_x3 = _linear_r2_scalar(b_r123["x3"], y_r123)
-    r123_x123 = _linear_r2_scalar(np.concatenate([b_r123["x1"], b_r123["x2"], b_r123["x3"]], axis=1), y_r123)
-    rows.extend(
-        [
-            {"atom": "R123", "metric": "R2(y_r123 | x1)", "score": float(r123_x1)},
-            {"atom": "R123", "metric": "R2(y_r123 | x2)", "score": float(r123_x2)},
-            {"atom": "R123", "metric": "R2(y_r123 | x3)", "score": float(r123_x3)},
-            {"atom": "R123", "metric": "R2(y_r123 | [x1,x2,x3])", "score": float(r123_x123)},
-            {"atom": "R123", "metric": "joint gain over best single", "score": float(r123_x123 - max(r123_x1, r123_x2, r123_x3))},
-        ]
-    )
+        # R123-only correctness
+        b_r123 = gen.generate(n=1200, pid_ids=[6] * 1200, return_aux=True)
+        y_r123 = b_r123["y_r123"]
+        r123_x1 = _linear_r2_scalar(b_r123["x1"], y_r123)
+        r123_x2 = _linear_r2_scalar(b_r123["x2"], y_r123)
+        r123_x3 = _linear_r2_scalar(b_r123["x3"], y_r123)
+        r123_x123 = _linear_r2_scalar(np.concatenate([b_r123["x1"], b_r123["x2"], b_r123["x3"]], axis=1), y_r123)
+        checks.update({"r123_x1": r123_x1, "r123_x2": r123_x2, "r123_x3": r123_x3, "r123_x123": r123_x123})
+        local_rows.extend(
+            [
+                {"atom": "R123", "metric": "R2(y_r123 | x1)", "score": float(r123_x1)},
+                {"atom": "R123", "metric": "R2(y_r123 | x2)", "score": float(r123_x2)},
+                {"atom": "R123", "metric": "R2(y_r123 | x3)", "score": float(r123_x3)},
+                {"atom": "R123", "metric": "R2(y_r123 | [x1,x2,x3])", "score": float(r123_x123)},
+                {"atom": "R123", "metric": "joint gain over best single", "score": float(r123_x123 - max(r123_x1, r123_x2, r123_x3))},
+            ]
+        )
 
-    # S12->3 correctness: target-view decode should be high, source-side joint should beat singles.
-    b_s = gen.generate(n=1600, pid_ids=[7] * 1600, return_aux=True)
-    y_s = b_s["y_s12_3"]
-    s_x3 = _linear_r2_scalar(b_s["x3"], y_s)
-    s_x1 = _random_feature_r2_scalar(b_s["x1"], y_s, n_features=128, seed=201)
-    s_x2 = _random_feature_r2_scalar(b_s["x2"], y_s, n_features=128, seed=202)
-    s_x12 = _random_feature_r2_scalar(np.concatenate([b_s["x1"], b_s["x2"]], axis=1), y_s, n_features=192, seed=203)
-    s_gap = float(s_x12 - max(s_x1, s_x2))
-    rows.extend(
-        [
-            {"atom": "S12->3", "metric": "R2(y_s | x3) target decode", "score": float(s_x3)},
-            {"atom": "S12->3", "metric": "R2(y_s | x1) source single", "score": float(s_x1)},
-            {"atom": "S12->3", "metric": "R2(y_s | x2) source single", "score": float(s_x2)},
-            {"atom": "S12->3", "metric": "R2(y_s | [x1,x2]) source joint", "score": float(s_x12)},
-            {"atom": "S12->3", "metric": "source joint gain", "score": float(s_gap)},
-        ]
-    )
+        # S12->3 correctness
+        b_s = gen.generate(n=1600, pid_ids=[7] * 1600, return_aux=True)
+        y_s = b_s["y_s12_3"]
+        s_x3 = _linear_r2_scalar(b_s["x3"], y_s)
+        s_x1 = _random_feature_r2_scalar(b_s["x1"], y_s, n_features=128, seed=201)
+        s_x2 = _random_feature_r2_scalar(b_s["x2"], y_s, n_features=128, seed=202)
+        s_x12 = _random_feature_r2_scalar(np.concatenate([b_s["x1"], b_s["x2"]], axis=1), y_s, n_features=192, seed=203)
+        s_gap = float(s_x12 - max(s_x1, s_x2))
+        checks.update({"s_x3": s_x3, "s_x1": s_x1, "s_x2": s_x2, "s_x12": s_x12, "s_gap": s_gap})
+        local_rows.extend(
+            [
+                {"atom": "S12->3", "metric": "R2(y_s | x3) target decode", "score": float(s_x3)},
+                {"atom": "S12->3", "metric": "R2(y_s | x1) source single", "score": float(s_x1)},
+                {"atom": "S12->3", "metric": "R2(y_s | x2) source single", "score": float(s_x2)},
+                {"atom": "S12->3", "metric": "R2(y_s | [x1,x2]) source joint", "score": float(s_x12)},
+                {"atom": "S12->3", "metric": "source joint gain", "score": float(s_gap)},
+            ]
+        )
+        return local_rows, checks
 
-    # Plot as four panels (one per correctness set) with horizontal bars for readability.
+    rows_low, checks_low = _collect_rows_for_sigma(sigma=0.05, seed=1300)
+    rows_high, _ = _collect_rows_for_sigma(sigma=0.45, seed=1301)
+
     atom_order = ["U1", "R12", "R123", "S12->3"]
-    atom_rows = {a: [r for r in rows if r["atom"] == a] for a in atom_order}
-    fig, axes = plt.subplots(2, 2, figsize=(15.6, 11.2))
-    axes = axes.ravel()
+    atom_rows_by_cond = {
+        "low": {a: [r for r in rows_low if r["atom"] == a] for a in atom_order},
+        "high": {a: [r for r in rows_high if r["atom"] == a] for a in atom_order},
+    }
+    fig, axes = plt.subplots(2, 4, figsize=(28.0, 11.8))
     palette = {
         "main": "#4c78a8",
         "control": "#bdbdbd",
@@ -959,72 +970,88 @@ def test_plot_single_atom_correctness_validation():
         "gain": "#f58518",
         "single": "#9c755f",
     }
-    for ax, atom in zip(axes, atom_order):
-        atom_metrics = atom_rows[atom]
-        raw_labels = [m["metric"] for m in atom_metrics]
-        if atom == "U1":
-            labels = ["x1 -> y_u1", "x2 -> y_u1 (ctrl)", "x3 -> y_u1 (ctrl)"]
-        elif atom == "R12":
-            labels = ["x1 -> y_r12", "x2 -> y_r12", "x3 -> y_r12 (ctrl)", "[x1,x2] -> y_r12", "joint gain"]
-        elif atom == "R123":
-            labels = ["x1 -> y_r123", "x2 -> y_r123", "x3 -> y_r123", "[x1,x2,x3] -> y_r123", "joint gain"]
-        else:
-            labels = ["x3 -> y_s (target)", "x1 -> y_s", "x2 -> y_s", "[x1,x2] -> y_s", "source joint gain"]
-        vals = np.array([m["score"] for m in atom_metrics], dtype=np.float32)
-        colors = []
-        for lbl in raw_labels:
-            if "control" in lbl:
-                colors.append(palette["control"])
-            elif "joint gain" in lbl or "source joint gain" in lbl:
-                colors.append(palette["gain"])
-            elif "[x1,x2" in lbl or "[x1,x2,x3]" in lbl or "source joint" in lbl:
-                colors.append(palette["joint"])
-            elif "single" in lbl:
-                colors.append(palette["single"])
-            else:
-                colors.append(palette["main"])
-
-        y = np.arange(len(labels))
-        ax.barh(y, vals, color=colors, alpha=0.9)
-        ax.axvline(0.0, color="black", linewidth=0.8, alpha=0.6)
-        ax.set_title(f"{atom} correctness set (low noise)")
-        ax.set_yticks(y)
-        ax.set_yticklabels(labels, fontsize=8)
-        ax.set_xlabel("held-out score (R²)")
-        ax.grid(axis="x", alpha=0.25)
-        for i, v in enumerate(vals):
-            pad = 0.02 if v >= 0 else -0.02
-            ax.text(v + pad, i, f"{v:.2f}", va="center", ha="left" if v >= 0 else "right", fontsize=8)
-        ax.invert_yaxis()
-
+    atom_labels = {
+        "U1": ["x1 -> y_u1", "x2 -> y_u1 (ctrl)", "x3 -> y_u1 (ctrl)"],
+        "R12": ["x1 -> y_r12", "x2 -> y_r12", "x3 -> y_r12 (ctrl)", "[x1,x2] -> y_r12", "joint gain"],
+        "R123": ["x1 -> y_r123", "x2 -> y_r123", "x3 -> y_r123", "[x1,x2,x3] -> y_r123", "joint gain"],
+        "S12->3": ["x3 -> y_s (target)", "x1 -> y_s", "x2 -> y_s", "[x1,x2] -> y_s", "source joint gain"],
+    }
+    atom_xlim: Dict[str, Tuple[float, float]] = {}
+    for atom in atom_order:
+        vals_low = np.array([r["score"] for r in atom_rows_by_cond["low"][atom]], dtype=np.float32)
+        vals_high = np.array([r["score"] for r in atom_rows_by_cond["high"][atom]], dtype=np.float32)
+        vals = np.concatenate([vals_low, vals_high])
         if atom in ("U1", "R12", "R123"):
-            ax.set_xlim(min(-0.18, float(np.min(vals)) - 0.06), 1.05)
+            atom_xlim[atom] = (min(-0.18, float(np.min(vals)) - 0.06), 1.05)
         else:
-            ax.set_xlim(min(-0.30, float(np.min(vals)) - 0.06), max(1.05, float(np.max(vals)) + 0.10))
+            atom_xlim[atom] = (min(-0.30, float(np.min(vals)) - 0.06), max(1.05, float(np.max(vals)) + 0.10))
 
-    fig.suptitle("Single-atom correctness validation (low noise): atom-aligned tasks should be near-ceiling", y=0.995)
-    fig.subplots_adjust(hspace=0.42, wspace=0.42, left=0.12, right=0.98, bottom=0.08, top=0.93)
+    cond_specs = [("low", 0.05), ("high", 0.45)]
+    for c_idx, (cond_key, sigma_val) in enumerate(cond_specs):
+        for a_idx, atom in enumerate(atom_order):
+            row = a_idx // 2
+            col = (a_idx % 2) + 2 * c_idx
+            ax = axes[row, col]
+            atom_metrics = atom_rows_by_cond[cond_key][atom]
+            raw_labels = [m["metric"] for m in atom_metrics]
+            labels = atom_labels[atom]
+            vals = np.array([m["score"] for m in atom_metrics], dtype=np.float32)
+
+            colors = []
+            for lbl in raw_labels:
+                if "control" in lbl:
+                    colors.append(palette["control"])
+                elif "joint gain" in lbl or "source joint gain" in lbl:
+                    colors.append(palette["gain"])
+                elif "[x1,x2" in lbl or "[x1,x2,x3]" in lbl or "source joint" in lbl:
+                    colors.append(palette["joint"])
+                elif "single" in lbl:
+                    colors.append(palette["single"])
+                else:
+                    colors.append(palette["main"])
+
+            y = np.arange(len(labels))
+            ax.barh(y, vals, color=colors, alpha=0.9)
+            ax.axvline(0.0, color="black", linewidth=0.8, alpha=0.6)
+            ax.set_title(atom)
+            ax.set_yticks(y)
+            ax.set_yticklabels(labels, fontsize=8)
+            ax.set_xlabel("held-out score (R²)")
+            ax.grid(axis="x", alpha=0.25)
+            for i, v in enumerate(vals):
+                pad = 0.02 if v >= 0 else -0.02
+                ax.text(v + pad, i, f"{v:.2f}", va="center", ha="left" if v >= 0 else "right", fontsize=8)
+            ax.invert_yaxis()
+            ax.set_xlim(*atom_xlim[atom])
+
+    # Group headers: specify noise once per block instead of repeating in each panel title.
+    fig.text(0.25, 0.965, "Low-noise correctness block (sigma=0.05, alpha=1.5, rho=0.8, hop=2)", ha="center", va="top", fontsize=12)
+    fig.text(0.75, 0.965, "Higher-noise robustness view (sigma=0.45, alpha=1.5, rho=0.8, hop=2)", ha="center", va="top", fontsize=12)
+    fig.add_artist(plt.Line2D([0.5, 0.5], [0.08, 0.94], transform=fig.transFigure, color="0.75", linewidth=1.0))
+
+    fig.suptitle("Single-atom correctness validation: atom-aligned tasks under low and higher noise", y=0.995)
+    fig.subplots_adjust(hspace=0.42, wspace=0.40, left=0.06, right=0.985, bottom=0.08, top=0.90)
     _savefig(out_dir / "single_atom_correctness_validation.png")
 
     csv_path = out_dir / "single_atom_correctness_validation.csv"
     with csv_path.open("w", encoding="utf-8") as f:
         f.write("atom,metric,score\n")
-        for r in rows:
+        for r in rows_low:
             f.write(f"{r['atom']},{r['metric']},{r['score']:.6f}\n")
 
     # Near-ceiling correctness expectations (thresholds chosen to be robust across seeds in low-noise mode).
-    assert u1_x1 > 0.90
-    assert max(u1_x2, u1_x3) < 0.20
+    assert checks_low["u1_x1"] > 0.90
+    assert max(checks_low["u1_x2"], checks_low["u1_x3"]) < 0.20
 
-    assert r12_x1 > 0.70 and r12_x2 > 0.70
-    assert r12_x3 < 0.20
-    assert r12_x12 >= max(r12_x1, r12_x2) - 0.03
+    assert checks_low["r12_x1"] > 0.70 and checks_low["r12_x2"] > 0.70
+    assert checks_low["r12_x3"] < 0.20
+    assert checks_low["r12_x12"] >= max(checks_low["r12_x1"], checks_low["r12_x2"]) - 0.03
 
-    assert min(r123_x1, r123_x2, r123_x3) > 0.65
-    assert r123_x123 >= max(r123_x1, r123_x2, r123_x3) - 0.03
+    assert min(checks_low["r123_x1"], checks_low["r123_x2"], checks_low["r123_x3"]) > 0.65
+    assert checks_low["r123_x123"] >= max(checks_low["r123_x1"], checks_low["r123_x2"], checks_low["r123_x3"]) - 0.03
 
-    assert s_x3 > 0.85
-    assert max(s_x1, s_x2, s_x12) < 0.30
+    assert checks_low["s_x3"] > 0.85
+    assert max(checks_low["s_x1"], checks_low["s_x2"], checks_low["s_x12"]) < 0.30
 
 
 def test_plot_atom_gain_controls_ur():

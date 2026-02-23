@@ -84,7 +84,9 @@ This section is ordered by evidential value for validating the generator. First 
 
 ![Single-atom correctness validation](test_outputs/pid_sar3/single_atom_correctness_validation.png)
 
-This is the primary validation figure. Each panel uses a single-atom dataset (`U1`, `R12`, `R123`, or `S12->3`) under low noise (`sigma = 0.05`, `alpha = 1.5`, `rho = 0.8`, `hop = 2`) and tests an atom-aligned target. If this figure fails, the rest of the diagnostics are not interpretable.
+*Figure 1. Single-atom correctness validation under two noise settings.* The left 2x2 block uses low noise (`sigma = 0.05`) and the right 2x2 block uses higher noise (`sigma = 0.45`), with `alpha = 1.5`, `rho = 0.8`, and `hop = 2` fixed in both blocks. Each panel corresponds to one atom-only dataset (`U1`, `R12`, `R123`, `S12->3`) and reports atom-aligned held-out probe scores.
+
+This is the primary validation figure. If the low-noise block fails, the rest of the diagnostics are not interpretable. The higher-noise block is included to show degradation under noisier observations without changing the task definition.
 
 In this section, `R²` denotes the held-out coefficient of determination of a probe model (fit on a train split, evaluated on a test split). If $\hat{y}^{\mathrm{te}}$ is the probe prediction on the test split and $y^{\mathrm{te}}$ is the corresponding target, then
 
@@ -98,7 +100,7 @@ Values near `1` indicate strong predictability, while values near `0` (or negati
 
 The bar labels follow a strict convention: `input -> target`. For example, `x1 -> y_u1` means a probe predicts the latent-derived target `y_u1` from view `x1`, and `[x1,x2] -> y_r12` means a probe predicts `y_r12` from the concatenated views `x1` and `x2`. Labels ending in `(ctrl)` are controls and should stay near chance because that view should not carry the target information. Bars named `joint gain` or `source joint gain` are improvements over the best single-view source and are included only to show whether combining sources helps.
 
-Read the figure row-wise. For `U1`, `x1 -> y_u1` should be near one and both control bars should be near chance. For `R12`, `x1 -> y_r12` and `x2 -> y_r12` should both be high, `x3 -> y_r12 (ctrl)` should remain low, and `[x1,x2] -> y_r12` should be best. For `R123`, all three single-view bars should be high and `[x1,x2,x3] -> y_r123` should be highest. For `S12->3`, the stable correctness criterion is `x3 -> y_s` (target view), because the synergy latent is projected into view 3.
+Read the figure row-wise, comparing the same atom across the left and right blocks. For `U1`, `x1 -> y_u1` should be high and both control bars should stay near chance. For `R12`, `x1 -> y_r12` and `x2 -> y_r12` should both be high, `x3 -> y_r12 (ctrl)` should remain low, and `[x1,x2] -> y_r12` should be best. For `R123`, all three single-view bars should be high and `[x1,x2,x3] -> y_r123` should be highest. For `S12->3`, the stable correctness criterion is `x3 -> y_s` (target view), because the synergy latent is projected into view 3.
 
 | Atom-only validation set | Metric | Score | Expected behavior |
 | --- | --- | ---: | --- |
@@ -111,19 +113,27 @@ Read the figure row-wise. For `U1`, `x1 -> y_u1` should be near one and both con
 | `R123` | `R²(y_r123 | [x1,x2,x3])` | 0.905 | Joint decoder is strongest. |
 | `S12->3` | `R²(y_s12_3 | x3)` | 0.960 | Near-ceiling target-view decode for the synergy-generated latent. |
 
+Table values summarize the low-noise block (left side of Figure 1).
+
 ### 3.2 Dependence Proxy Signatures (`D(i,j)`) for U/R Structure
 
 The next three figures validate raw cross-view structure through the dependence proxy $D(X_A,X_B)=\tfrac{1}{2}(R^2(X_A\to X_B)+R^2(X_B\to X_A))$. The interpretation is the same throughout: `D(1,2)` is high only when views 1 and 2 share predictable structure. In this dataset, `D(1,2)` should be low for `U1`, high for `R12`, and elevated for `R123`. This is the main raw-data sanity statistic for the U/R subset. When in doubt, inspect `D(1,2)` first and then check whether the matching atom (`R12`) is the one that moves.
 
 ![U/R signature grid over sigma](test_outputs/pid_sar3/ur_compact_signature_grid_over_sigma.png)
 
+*Figure 2. U/R dependence signature grid across noise.* Each cell is a dependence score `D(i,j)` for one atom and one noise level. Pairwise redundancy atoms activate their matching pair, `R123` elevates all pairs, and increasing `sigma` contracts the scores.
+
 This heatmap is the fastest U/R sanity check. Each cell is `D(i,j)` for one atom and one noise level `sigma`. Unique atoms stay near the noise floor, pairwise redundancy atoms activate the matching pair, and `R123` elevates all pairs. As `sigma` increases, all dependence values contract toward zero.
 
 ![PID dependence distributions](test_outputs/pid_sar3/pid_dependence_distributions_boxplots.png)
 
+*Figure 3. Repeated-batch distributions of the dependence proxy `D(i,j)` across PID atoms.* Boxplots summarize the expected pair-specific ordering together with finite-sample variability.
+
 This plot adds variability to the same `D(i,j)` story. It shows repeated-batch distributions of `D(1,2)`, `D(1,3)`, and `D(2,3)`, so both the expected ordering and the sampling spread are visible. The key reading remains the same: the matching redundancy atom should dominate its matching `D(i,j)`.
 
 ![U/R hyperparameter sweeps](test_outputs/pid_sar3/ur_hyperparameter_sweeps_compact.png)
+
+*Figure 4. Hyperparameter sensitivity in the U/R subset.* The left panel links redundancy overlap `rho` to `D(1,2)` for `R12`, and the right panel shows how `alpha` and `sigma` affect the raw observation norm.
 
 This figure links the equations directly to `D`. Increasing `rho` in $r_i=\sqrt{\rho}\,r+\sqrt{1-\rho}\,\eta_i$ increases shared latent content and should increase `D(1,2)` for `R12`. The norm panel shows how `alpha` and `sigma` change raw scale in $x_k=\mathrm{signal}_k+\varepsilon_k$.
 
@@ -132,6 +142,8 @@ This figure links the equations directly to `D`. Increasing `rho` in $r_i=\sqrt{
 These summaries are stress tests, not correctness checks. They test whether diagnostics move in the expected direction when one atom is selectively amplified via `pid_gain_overrides`, with nuisance settings fixed (`sigma = 0.45`, `rho = 0.5`, `hop = 2`).
 
 ![Downstream task boosting summary](test_outputs/pid_sar3/downstream_task_boosting_summary.png)
+
+*Figure 5. Targeted-boost stress test using atom-aligned downstream tasks.* Each column is chosen to match one atom family, so selective boosts become visible in the corresponding task score.
 
 This is the most informative boost figure because it uses atom-aligned targets. It makes `boost_U1`, `boost_R12`, `boost_R123`, and `boost_S12->3` visible in the corresponding downstream tasks. Increasing `U1` does not change `y_u1`; it improves predictability of `y_u1` from `x1` by increasing signal in `x1`.
 
@@ -145,6 +157,8 @@ This is the most informative boost figure because it uses atom-aligned targets. 
 
 ![Synergy task gap boosting summary](test_outputs/pid_sar3/synergy_task_gap_boosting_summary.png)
 
+*Figure 6. Synergy-specific stress diagnostic for `S12->3`.* The left panel reports a joint-vs-single probe gap on the latent-derived synergy target, and the right panel reports target-view decode performance as a control readout.
+
 This is the main synergy-specific stress diagnostic. It tracks the joint-vs-single probe gap $\Delta_{\mathrm{task}} = R^2([x_1,x_2]\rightarrow y) - \max\{R^2(x_1\rightarrow y), R^2(x_2\rightarrow y)\}$ for `S12->3`, plus the target-view decode `R²(x3 \rightarrow y_s12_3)`. Absolute values are probe-dependent, so the useful signal is the relative shift under `boost_S12->3`.
 
 | Scenario | `R²(x1→y)` | `R²(x2→y)` | `R²([x1,x2]→y)` | `Δ_task` | `R²(x3→y)` |
@@ -156,6 +170,8 @@ This is the main synergy-specific stress diagnostic. It tracks the joint-vs-sing
 | boost `S12->3` | -0.147 | -0.214 | -0.129 | 0.018 | 0.257 |
 
 ![CCA boosting mechanisms summary](test_outputs/pid_sar3/cca_boosting_mechanisms_summary.png)
+
+*Figure 7. Holdout CCA summary under targeted boosts.* This figure is mainly informative for redundancy boosts (`R12`, `R123`) and is included as a secondary stress diagnostic.
 
 This CCA boost summary is secondary. It is useful for redundancy boosts (`R12`, `R123`), but it is weak for directional synergy even when `CCA([x1,x2],x3)` is used.
 
@@ -170,6 +186,7 @@ This CCA boost summary is secondary. It is useful for redundancy boosts (`R12`, 
 ### 3.4 Secondary / Optional Diagnostics
 
 The following tests are useful during development but are not required for the main validation argument in this note: `test_plot_pid_metadata_distributions()` (sampling sanity checks) and `test_plot_atom_gain_controls_ur()` (gain-effect intuition).
+
 ## 4. Code Tutorial (How the Dataset Is Implemented and Used)
 
 This section maps the formal specification to the implementation.

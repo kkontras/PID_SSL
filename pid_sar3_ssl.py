@@ -1,0 +1,235 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Optional, Tuple
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+@dataclass
+class SSLEncoderConfig:
+    input_dim: int = 32
+    encoder_hidden_dim: int = 128
+    representation_dim: int = 64
+    projector_hidden_dim: int = 128
+    projector_dim: int = 64
+
+
+@dataclass
+class SSLTrainConfig:
+    objective: str = "pairwise_simclr"
+    lr: float = 1e-3
+    weight_decay: float = 1e-5
+    batch_size: int = 256
+    steps: int = 200
+    temperature: float = 0.2
+    log_every: int = 10
+    device: str = "cpu"
+    seed: int = 0
+
+
+class ModalityEncoder(nn.Module):
+    def __init__(self, cfg: SSLEncoderConfig):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(cfg.input_dim, cfg.encoder_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(cfg.encoder_hidden_dim, cfg.encoder_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(cfg.encoder_hidden_dim, cfg.representation_dim),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class Projector(nn.Module):
+    def __init__(self, cfg: SSLEncoderConfig):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(cfg.representation_dim, cfg.projector_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(cfg.projector_hidden_dim, cfg.projector_dim),
+        )
+
+    def forward(self, h: torch.Tensor) -> torch.Tensor:
+        return self.net(h)
+
+
+class TriModalSSLModel(nn.Module):
+    """Three independent encoders/projectors for x1, x2, x3 modalities."""
+
+    def __init__(self, cfg: SSLEncoderConfig):
+        super().__init__()
+        self.cfg = cfg
+        self.encoders = nn.ModuleDict(
+            {
+                "x1": ModalityEncoder(cfg),
+                "x2": ModalityEncoder(cfg),
+                "x3": ModalityEncoder(cfg),
+            }
+        )
+        self.projectors = nn.ModuleDict(
+            {
+                "x1": Projector(cfg),
+                "x2": Projector(cfg),
+                "x3": Projector(cfg),
+            }
+        )
+
+    def encode(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        return {k: self.encoders[k](batch[k]) for k in ("x1", "x2", "x3")}
+
+    def project(self, reps: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        return {k: self.projectors[k](reps[k]) for k in ("x1", "x2", "x3")}
+
+    def forward(self, batch: Dict[str, torch.Tensor]) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        h = self.encode(batch)
+        z = self.project(h)
+        return h, z
+
+
+def _nt_xent_pair(z_a: torch.Tensor, z_b: torch.Tensor, temperature: float = 0.2) -> torch.Tensor:
+    """Standard SimCLR / NT-Xent loss for a positive paired batch (a_i, b_i)."""
+    z_a = F.normalize(z_a, dim=-1)
+    z_b = F.normalize(z_b, dim=-1)
+    n = z_a.shape[0]
+    z = torch.cat([z_a, z_b], dim=0)  # (2n, d)
+    logits = (z @ z.T) / temperature
+    logits = logits - torch.max(logits, dim=1, keepdim=True).values.detach()
+
+    mask = torch.eye(2 * n, dtype=torch.bool, device=z.device)
+    logits = logits.masked_fill(mask, float("-inf"))
+    targets = torch.arange(2 * n, device=z.device)
+    targets[:n] += n
+    targets[n:] -= n
+    return F.cross_entropy(logits, targets)
+
+
+def _multi_positive_infonce(anchor: torch.Tensor, positives_1: torch.Tensor, positives_2: torch.Tensor, temperature: float = 0.2) -> torch.Tensor:
+    """
+    Anchor has two positives for the same index (e.g., x1 matches x2 and x3).
+    Negatives are all non-matching examples from the two positive pools.
+    """
+    anchor = F.normalize(anchor, dim=-1)
+    positives_1 = F.normalize(positives_1, dim=-1)
+    positives_2 = F.normalize(positives_2, dim=-1)
+    n = anchor.shape[0]
+
+    cand = torch.cat([positives_1, positives_2], dim=0)  # (2n, d)
+    logits = (anchor @ cand.T) / temperature  # (n, 2n)
+    logits = logits - torch.max(logits, dim=1, keepdim=True).values.detach()
+    exp_logits = torch.exp(logits)
+    denom = exp_logits.sum(dim=1) + 1e-12
+    pos_mass = exp_logits[torch.arange(n, device=anchor.device), torch.arange(n, device=anchor.device)]
+    pos_mass = pos_mass + exp_logits[torch.arange(n, device=anchor.device), torch.arange(n, device=anchor.device) + n]
+    return (-torch.log((pos_mass + 1e-12) / denom)).mean()
+
+
+def ssl_objective_loss(
+    z: Dict[str, torch.Tensor],
+    objective: str,
+    temperature: float = 0.2,
+) -> Tuple[torch.Tensor, Dict[str, float]]:
+    if objective == "pairwise_simclr":
+        l12 = _nt_xent_pair(z["x1"], z["x2"], temperature)
+        l13 = _nt_xent_pair(z["x1"], z["x3"], temperature)
+        l23 = _nt_xent_pair(z["x2"], z["x3"], temperature)
+        loss = (l12 + l13 + l23) / 3.0
+        metrics = {"loss_12": float(l12.detach().cpu()), "loss_13": float(l13.detach().cpu()), "loss_23": float(l23.detach().cpu())}
+        return loss, metrics
+    if objective == "tri_positive_infonce":
+        l1 = _multi_positive_infonce(z["x1"], z["x2"], z["x3"], temperature)
+        l2 = _multi_positive_infonce(z["x2"], z["x1"], z["x3"], temperature)
+        l3 = _multi_positive_infonce(z["x3"], z["x1"], z["x2"], temperature)
+        loss = (l1 + l2 + l3) / 3.0
+        metrics = {"loss_anchor_x1": float(l1.detach().cpu()), "loss_anchor_x2": float(l2.detach().cpu()), "loss_anchor_x3": float(l3.detach().cpu())}
+        return loss, metrics
+    raise ValueError(f"Unknown objective: {objective}")
+
+
+def numpy_batch_to_torch(batch: Dict[str, np.ndarray], device: str) -> Dict[str, torch.Tensor]:
+    out: Dict[str, torch.Tensor] = {}
+    for k in ("x1", "x2", "x3"):
+        out[k] = torch.from_numpy(batch[k]).float().to(device)
+    return out
+
+
+def train_ssl(
+    model: TriModalSSLModel,
+    generator,
+    cfg: SSLTrainConfig,
+    pid_schedule: Optional[Iterable[int]] = None,
+) -> List[Dict[str, float]]:
+    torch.manual_seed(cfg.seed)
+    np.random.seed(cfg.seed)
+    device = torch.device(cfg.device)
+    model.to(device)
+    model.train()
+    opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+
+    schedule_list = list(pid_schedule) if pid_schedule is not None else None
+    history: List[Dict[str, float]] = []
+    for step in range(1, cfg.steps + 1):
+        if schedule_list is None:
+            batch_np = generator.generate(n=cfg.batch_size)
+        else:
+            pids = [schedule_list[(step * cfg.batch_size + i) % len(schedule_list)] for i in range(cfg.batch_size)]
+            batch_np = generator.generate(n=cfg.batch_size, pid_ids=pids)
+        batch_t = numpy_batch_to_torch(batch_np, device=str(device))
+        _, z = model(batch_t)
+        loss, parts = ssl_objective_loss(z, objective=cfg.objective, temperature=cfg.temperature)
+
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        opt.step()
+
+        row = {"step": float(step), "loss": float(loss.detach().cpu())}
+        row.update(parts)
+        history.append(row)
+    return history
+
+
+@torch.no_grad()
+def encode_numpy(model: TriModalSSLModel, batch: Dict[str, np.ndarray], device: str = "cpu") -> Dict[str, np.ndarray]:
+    model.eval()
+    t_batch = numpy_batch_to_torch(batch, device=device)
+    reps = model.encode(t_batch)
+    return {k: reps[k].detach().cpu().numpy().astype(np.float32) for k in ("x1", "x2", "x3")}
+
+
+def concat_representations(reps: Dict[str, np.ndarray]) -> np.ndarray:
+    return np.concatenate([reps["x1"], reps["x2"], reps["x3"]], axis=1)
+
+
+def family_from_pid_ids(pid_ids: np.ndarray) -> np.ndarray:
+    pid_ids = np.asarray(pid_ids).astype(np.int64)
+    fam = np.zeros_like(pid_ids)
+    fam[(pid_ids >= 3) & (pid_ids <= 6)] = 1  # redundancy
+    fam[(pid_ids >= 7)] = 2  # synergy
+    return fam
+
+
+def pair_retrieval_at_1(a: np.ndarray, b: np.ndarray) -> float:
+    """Same-index retrieval accuracy using cosine similarity."""
+    a_n = a / (np.linalg.norm(a, axis=1, keepdims=True) + 1e-8)
+    b_n = b / (np.linalg.norm(b, axis=1, keepdims=True) + 1e-8)
+    sims = a_n @ b_n.T
+    pred = np.argmax(sims, axis=1)
+    target = np.arange(a.shape[0])
+    return float(np.mean(pred == target))
+
+
+def pair_retrieval_matrix(reps: Dict[str, np.ndarray]) -> np.ndarray:
+    keys = ("x1", "x2", "x3")
+    mat = np.zeros((3, 3), dtype=np.float32)
+    for i, ka in enumerate(keys):
+        for j, kb in enumerate(keys):
+            if i == j:
+                mat[i, j] = 1.0
+            else:
+                mat[i, j] = pair_retrieval_at_1(reps[ka], reps[kb])
+    return mat

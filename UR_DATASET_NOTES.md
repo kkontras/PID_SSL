@@ -92,7 +92,7 @@ This section is ordered by evidential value for validating the generator. First 
 
 These are the primary validation figures. If the low-noise block fails in either Figure 1A or Figure 1B, the rest of the diagnostics are not interpretable. The higher-noise block is included to show degradation under noisier observations without changing the task definition.
 
-Figures 1A and 1B use held-out `AUROC` (area under the ROC curve) for binary probe tasks obtained by thresholding each latent target into a binary label. Bars labeled `joint gain` or `source gain` report a difference in AUROC relative to the best single-source probe (that is, `ΔAUROC`).
+Figures 1A and 1B use held-out `AUROC` (area under the ROC curve) for binary probe tasks obtained by thresholding each latent target into a binary label. If $\hat{s}^{\mathrm{te}}$ denotes a probe score on the test split and $z^{\mathrm{te}}\in\{0,1\}$ the corresponding binary label, then AUROC is the probability that a randomly chosen positive example receives a higher score than a randomly chosen negative example. Bars labeled `joint gain` or `source gain` report a difference in AUROC relative to the best single-source probe (that is, `ΔAUROC`).
 
 Table 1 summarizes a compact subset of the AUROC results shown in Figures 1A and 1B. The columns are chosen to reflect the main visual claims: an aligned probe, a control probe, a joint redundancy probe, a triple-redundancy probe, a target-view synergy probe, and a source-joint synergy probe.
 
@@ -101,40 +101,17 @@ Table 1 summarizes a compact subset of the AUROC results shown in Figures 1A and
 | low (`sigma=0.05`) | logistic | 0.998 | 0.469 | 0.966 | 0.968 | 0.992 | 0.509 |
 | low (`sigma=0.05`) | stronger MLP | 0.997 | 0.508 | 0.967 | 0.963 | 0.952 | 0.574 |
 | low (`sigma=0.05`) | RBF-SVM | 0.997 | 0.468 | 0.958 | 0.963 | 0.965 | 0.670 |
-| low (`sigma=0.05`) | XGBoost | n/a | n/a | n/a | n/a | n/a | n/a |
 | higher (`sigma=0.45`) | logistic | 0.967 | 0.537 | 0.912 | 0.944 | 0.736 | 0.568 |
 | higher (`sigma=0.45`) | stronger MLP | 0.961 | 0.538 | 0.931 | 0.947 | 0.755 | 0.519 |
 | higher (`sigma=0.45`) | RBF-SVM | 0.947 | 0.509 | 0.938 | 0.946 | 0.642 | 0.583 |
-| higher (`sigma=0.45`) | XGBoost | n/a | n/a | n/a | n/a | n/a | n/a |
 
-Table 1 should be read together with Figures 1A and 1B. Aligned probes remain high for `U1`, `R12`, and `R123`, control probes remain near chance (`AUROC ≈ 0.5`), and `x3 -> s` is the stable correctness probe for `S12->3`. Increasing noise degrades aligned probes without changing these qualitative roles. In this environment, `xgboost` is not installed, so the XGBoost rows are reported as `n/a`.
+Table 1 should be read together with Figures 1A and 1B. Aligned probes remain high for `U1`, `R12`, and `R123`, control probes remain near chance (`AUROC ≈ 0.5`), and `x3 -> s` is the stable correctness probe for `S12->3`. Increasing noise degrades aligned probes without changing these qualitative roles.
 
-For completeness, the table below reports low-noise held-out regression performance using `R²`. In this section, `R²` denotes the held-out coefficient of determination of a probe model (fit on a train split, evaluated on a test split). If $\hat{y}^{\mathrm{te}}$ is the probe prediction on the test split and $y^{\mathrm{te}}$ is the corresponding target, then
-
-```math
-R^2 = 1 - \frac{\sum_n (y_n^{\mathrm{te}} - \hat{y}_n^{\mathrm{te}})^2}{\sum_n (y_n^{\mathrm{te}} - \bar{y}^{\mathrm{te}})^2},
-\qquad
-\bar{y}^{\mathrm{te}} = \frac{1}{N_{\mathrm{te}}}\sum_n y_n^{\mathrm{te}}.
-```
-
-Values near `1` indicate strong predictability, while values near `0` (or negative) indicate poor performance relative to predicting the test-set mean. For `AUROC`, values near `1` indicate strong separability, and values near `0.5` indicate near-chance binary discrimination.
+For `AUROC`, values near `1` indicate strong separability, and values near `0.5` indicate near-chance binary discrimination.
 
 The bar labels follow a strict convention: `input -> target`. For example, `x1 -> y_u1` means a probe predicts the latent-derived target `y_u1` from view `x1`, and `[x1,x2] -> y_r12` means a probe predicts `y_r12` from the concatenated views `x1` and `x2`. Labels ending in `(ctrl)` are controls and should stay near chance because that view should not carry the target information. Bars named `joint gain` or `source joint gain` are improvements over the best single-view source and are included only to show whether combining sources helps.
 
 Read Figures 1A and 1B row-wise, comparing the same atom across the low-noise and higher-noise column blocks, and then compare Figure 1A (linear classifier) against Figure 1B (small nonlinear probe). For `U1`, `x1 -> y_u1` should be high and both control bars should stay near chance. For `R12`, `x1 -> y_r12` and `x2 -> y_r12` should both be high, `x3 -> y_r12 (ctrl)` should remain low, and `[x1,x2] -> y_r12` should be best. For `R123`, all three single-view bars should be high and `[x123] -> y_r123` should be highest. For `S12->3`, the stable correctness criterion is `x3 -> y_s` (target view), because the synergy latent is projected into view 3.
-
-| Atom-only validation set (regression reference) | Metric | Score | Expected behavior |
-| --- | --- | ---: | --- |
-| `U1` | `R²(y_u1 | x1)` | 0.998 | Near-ceiling decode from the active view. |
-| `U1` | `R²(y_u1 | x2)` / `R²(y_u1 | x3)` (controls) | -0.068 / -0.025 | Inactive views stay near chance. |
-| `R12` | `R²(y_r12 | x1)` / `R²(y_r12 | x2)` | 0.791 / 0.764 | Both redundant source views carry the shared latent. |
-| `R12` | `R²(y_r12 | x3)` (control) | -0.016 | Inactive third view remains near chance. |
-| `R12` | `R²(y_r12 | [x1,x2])` | 0.871 | Joint decoder improves over either source alone. |
-| `R123` | `R²(y_r123 | x1/x2/x3)` | 0.774 / 0.811 / 0.778 | All three views decode the triple-shared latent. |
-| `R123` | `R²(y_r123 | [x1,x2,x3])` | 0.905 | Joint decoder is strongest. |
-| `S12->3` | `R²(y_s12_3 | x3)` | 0.960 | Near-ceiling target-view decode for the synergy-generated latent. |
-
-Table 2 values summarize the low-noise regression reference (the same low-noise setting used in the left blocks of Figures 1A and 1B).
 
 ### 3.2 Dependence Proxy Signatures (`D(i,j)`) for U/R Structure
 
@@ -401,5 +378,103 @@ def make_split(path, n_per_atom):
 make_split("data/pid_sar3_ur_train.npz", 10000)
 make_split("data/pid_sar3_ur_val.npz",   1000)
 make_split("data/pid_sar3_ur_test.npz",  1000)
+PY
+```
+
+## 6. First SSL Baselines (Tri-Modal Encoders + Contrastive Objectives)
+
+This section adds an initial SSL training scaffold that treats `x1`, `x2`, and `x3` as three modalities and trains **three independent encoders + projectors** with contrastive objectives.
+
+Implementation entry points:
+
+- `pid_sar3_ssl.py` (tri-modal encoders/projectors, contrastive losses, training loop)
+- `tests/test_pid_sar3_ssl_baselines.py` (runs small SSL experiments, saves plots/CSVs)
+
+### 6.1 What Was Implemented
+
+Two first objectives are wired in:
+
+- `pairwise_simclr`: SimCLR / NT-Xent applied to each modality pair and averaged over `(x1,x2)`, `(x1,x3)`, `(x2,x3)`.
+- `tri_positive_infonce`: one anchor modality with **two positives** (the other two modalities), averaged over anchors `x1`, `x2`, `x3`.
+
+These use:
+
+- one encoder per modality (`x1`, `x2`, `x3`)
+- one projector per modality
+- frozen-representation linear probes for evaluation (`PID` 10-way and atom-family 3-way)
+
+### 6.2 Quick Experiment Setup (Initial Smoke Test)
+
+The first run is intentionally small (for iteration speed):
+
+- dataset: `d=32`, `m=8`, `sigma=0.45`
+- SSL model: MLP encoders/projectors with representation dim `48`
+- training: `120` steps, batch size `192`, CPU
+- evaluation: frozen linear probes on held-out synthetic data
+
+### 6.3 Results
+
+#### Training Curves
+
+![Tri-modal SSL training loss curves](test_outputs/pid_sar3_ssl/ssl_training_loss_curves.png)
+
+*Figure 8. Contrastive training loss for the first two tri-modal SSL baselines.* Both objectives optimize stably in this short smoke-test regime. `tri_positive_infonce` reaches a lower loss than the pairwise SimCLR sum under the same budget.
+
+#### Frozen Probe Accuracy
+
+![SSL probe accuracy summary](test_outputs/pid_sar3_ssl/ssl_probe_accuracy_summary.png)
+
+*Figure 9. Frozen linear probe accuracy on held-out synthetic data.* `Raw concat` is a no-SSL reference on the observations themselves. Both SSL baselines improve probeability over this short training budget, with `tri_positive_infonce` best in this run.
+
+#### Cross-Modal Alignment Tendency by Atom Family
+
+![Cross-modal cosine by family](test_outputs/pid_sar3_ssl/ssl_cross_modal_cosine_by_family.png)
+
+*Figure 10. Mean same-sample cross-modal cosine (averaged over modality pairs) stratified by atom family.* The pairwise SimCLR sum shows a stronger global alignment tendency (including on unique atoms, where aggressive alignment is not always desirable), while `tri_positive_infonce` stays closer to neutral/weak-positive alignment and yields better probe scores in this short run.
+
+#### Table 3. Initial SSL Baseline Summary (from `test_outputs/pid_sar3_ssl/ssl_baseline_summary.csv`)
+
+| Objective | Steps | Final loss | 10-way PID probe acc | 3-way family probe acc | Mean cross-modal cosine | Unique cos | Redundancy cos | Synergy cos |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Raw concat (no SSL) | 0 | n/a | 0.099 | 0.359 | 0.001 | -0.006 | 0.006 | 0.001 |
+| Pairwise SimCLR (sum over pairs) | 120 | 5.947 | 0.314 | 0.437 | -0.084 | -0.083 | -0.083 | -0.087 |
+| Tri-positive InfoNCE | 120 | 5.023 | 0.387 | 0.452 | 0.033 | 0.034 | 0.032 | 0.034 |
+
+Reading Table 3:
+
+- The frozen probes improve substantially after SSL training (even in a short CPU run).
+- `tri_positive_infonce` is the strongest of the two initial objectives on both probe tasks here.
+- The pairwise SimCLR sum appears to over-regularize toward a broad cross-modal geometry in this configuration (negative average cosine values), which is plausible given that many samples contain **unique** information in only one modality.
+
+### 6.4 Why This Is Already Informative
+
+This dataset is a good stress test for naive multi-view contrastive learning because the positive pairing assumption is only partially aligned with the data-generating process:
+
+- `R` atoms support cross-modal alignment directly.
+- `S` atoms support structured cross-modal dependence, but not necessarily simple pairwise similarity.
+- `U` atoms can make some cross-modal positive pairs effectively noisy/misaligned.
+
+So a strong result here is not "maximize alignment everywhere"; it is "learn a representation that preserves atom structure without collapsing distinctions."
+
+### 6.5 Next SSL Ideas (Recommended)
+
+The current code now supports easy objective iteration. Strong next candidates:
+
+1. `VICReg-3` / multi-view variance-invariance-covariance regularization.
+2. `Barlow Twins` pairwise over all modality pairs (compare against pairwise SimCLR).
+3. `Joint predictive` objective: predict one modality representation from the other two (`[h_i,h_j] -> h_k`).
+4. `Hybrid contrastive + predictive`: pairwise SimCLR for redundancy, predictive loss for synergy-sensitive transfer.
+5. `Agreement-gated contrastive`: down-weight likely-misaligned positives (especially `U`-heavy batches) using an online confidence score.
+6. `Family-aware evaluation suite`: expand frozen probes to atom-aligned tasks (`y_u1`, `y_r12`, `y_r123`, `y_s12_3`) on learned embeddings, not just raw observations.
+
+### 6.6 Reproducing the SSL Baseline Plots
+
+`pytest` may not be installed in all environments, so the plotting test can be run directly:
+
+```bash
+python - <<'PY'
+from tests.test_pid_sar3_ssl_baselines import test_plot_ssl_baseline_results
+test_plot_ssl_baseline_results()
+print("Saved SSL baseline outputs under test_outputs/pid_sar3_ssl")
 PY
 ```

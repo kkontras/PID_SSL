@@ -12,7 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 from sklearn.preprocessing import StandardScaler
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -253,6 +253,41 @@ def _evaluate_all_tasks(Xtr: np.ndarray, train_batch: Dict[str, np.ndarray], Xte
     return out
 
 
+def _pid_confusion_failure_metrics(cm: np.ndarray) -> Dict[str, float]:
+    """Compact pathology metrics for PID confusions: redundancy recall and R->S leakage."""
+    cm = cm.astype(np.float64)
+    row_sums = np.maximum(cm.sum(axis=1), 1.0)
+    r_rows = np.array([3, 4, 5, 6], dtype=np.int64)  # R12, R13, R23, R123
+    s_cols = np.array([7, 8, 9], dtype=np.int64)     # S12->3, S13->2, S23->1
+    r_recalls = np.array([cm[i, i] / row_sums[i] for i in r_rows], dtype=np.float64)
+    r_to_s = np.array([cm[i, s_cols].sum() / row_sums[i] for i in r_rows], dtype=np.float64)
+    return {
+        "r_recall_mean": float(np.mean(r_recalls)),
+        "r_to_s_leakage_mean": float(np.mean(r_to_s)),
+        "r_recall_r12": float(r_recalls[0]),
+        "r_recall_r13": float(r_recalls[1]),
+        "r_recall_r23": float(r_recalls[2]),
+        "r_recall_r123": float(r_recalls[3]),
+    }
+
+
+def _mean_ci95(values: List[float]) -> Dict[str, float]:
+    arr = np.asarray(values, dtype=np.float64)
+    n = int(arr.size)
+    mean = float(np.mean(arr))
+    std = float(np.std(arr, ddof=1)) if n > 1 else 0.0
+    se = std / np.sqrt(max(n, 1))
+    half = 1.96 * se if n > 1 else 0.0
+    return {
+        "n": float(n),
+        "mean": mean,
+        "std": std,
+        "se": float(se),
+        "ci95_low": float(mean - half),
+        "ci95_high": float(mean + half),
+    }
+
+
 def _subset_concat(parts: Dict[str, np.ndarray], keys: Tuple[str, ...]) -> np.ndarray:
     return np.concatenate([parts[k] for k in keys], axis=1).astype(np.float32)
 
@@ -277,11 +312,22 @@ def _evaluate_subset_predictors(
     rows: List[Dict[str, float]] = []
     ytr_pid = train_batch["pid_id"].astype(np.int64)
     yte_pid = test_batch["pid_id"].astype(np.int64)
+    ytr_fam = family_from_pid_ids(ytr_pid)
+    yte_fam = family_from_pid_ids(yte_pid)
     for subset_name, ks in subsets:
         Xs_tr = _subset_concat(parts_tr, ks)
         Xs_te = _subset_concat(parts_te, ks)
         pid_eval = _fit_classifier_with_confusion(Xs_tr, ytr_pid, Xs_te, yte_pid, labels=np.arange(10))
-        row: Dict[str, float] = {"pid10_acc": float(pid_eval["acc"][0])}
+        fam_eval = _fit_classifier_with_confusion(Xs_tr, ytr_fam, Xs_te, yte_fam, labels=np.arange(3))
+        fam_pred = fam_eval["pred"]  # type: ignore[index]
+        row: Dict[str, float] = {
+            "pid10_acc": float(pid_eval["acc"][0]),
+            "family3_acc": float(fam_eval["acc"][0]),
+            "family3_macro_f1": float(f1_score(yte_fam, fam_pred, average="macro", zero_division=0)),
+            "u_f1": float(f1_score((yte_fam == 0).astype(np.int64), (fam_pred == 0).astype(np.int64), zero_division=0)),
+            "r_f1": float(f1_score((yte_fam == 1).astype(np.int64), (fam_pred == 1).astype(np.int64), zero_division=0)),
+            "s_f1": float(f1_score((yte_fam == 2).astype(np.int64), (fam_pred == 2).astype(np.int64), zero_division=0)),
+        }
         for y_key, m_key in [("y_u1", "mask_y_u1"), ("y_r12", "mask_y_r12"), ("y_r123", "mask_y_r123"), ("y_s12_3", "mask_y_s12_3")]:
             mtr = train_batch[m_key].astype(bool)
             mte = test_batch[m_key].astype(bool)
@@ -563,8 +609,8 @@ def test_plot_fused_confusions_four_models_higher_order():
     Four-way fused frozen-encoder comparison:
     - Model A: sum of 3 unimodal SimCLR streams
     - Model B: sum of 3 pairwise InfoNCE losses (pairwise NT-Xent; SimCLR-style)
-    - Model C: TRIANGLE exact-style area contrastive
-    - Model D: ConFu-style (pairwise + trainable fused-pair-to-third contrastive terms)
+    - Model C: TRIANGLE (area contrastive)
+    - Model D: ConFu (pairwise + trainable fused-pair-to-third contrastive terms)
     """
     out_dir = _ensure_plot_dir()
 
@@ -640,8 +686,8 @@ def test_plot_fused_confusions_four_models_higher_order():
     model_titles = {
         "model_a_unimodal_simclr_sum": "A: 3x unimodal SimCLR",
         "model_b_pairwise_infonce_sum": "B: pairwise InfoNCE sum\n(pairwise SimCLR/NT-Xent)",
-        "model_c_triangle_like": "C: TRIANGLE (area contrastive)",
-        "model_d_confu_style": "D: ConFu-style (fusion-head)",
+        "model_c_triangle_like": "C: TRIANGLE",
+        "model_d_confu_style": "D: ConFu",
     }
 
     # Primary figure: 2x2 PID-10 confusion matrices.
@@ -667,7 +713,7 @@ def test_plot_fused_confusions_four_models_higher_order():
 
     # Geometry comparison (compact bar-panel)
     geo_keys = ["model_a_unimodal_simclr_sum", "model_b_pairwise_infonce_sum", "model_c_triangle_like", "model_d_confu_style"]
-    geo_labels = ["A: 3x uni SimCLR", "B: pairwise InfoNCE", "C: TRIANGLE exact", "D: ConFu fusion-head"]
+    geo_labels = ["A: 3x uni SimCLR", "B: pairwise InfoNCE", "C: TRIANGLE", "D: ConFu"]
     colors = ["#4c78a8", "#f58518", "#54a24b", "#e45756"]
     x = np.arange(4)
     fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.4))
@@ -744,6 +790,27 @@ def test_plot_fused_confusions_four_models_higher_order():
     fig.subplots_adjust(bottom=0.15, wspace=0.28, hspace=0.30)
     _savefig(out_dir / "subset_predictor_heatmaps_four_models.png")
 
+    # Family subset classification diagnostics (the most direct U/R/S grasp check).
+    fam_metric_order = ["family3_acc", "family3_macro_f1", "u_f1", "r_f1", "s_f1"]
+    fam_metric_labels = ["Family-3 acc", "Family-3 macro-F1", "U F1", "R F1", "S F1"]
+    fig, axes = plt.subplots(2, 2, figsize=(18.5, 12.0))
+    for ax, key in zip(axes.flat, geo_keys):
+        row_map = {str(r["subset"]): r for r in subset_probe[key]}
+        mat_fam = np.array([[float(row_map[s][m]) for m in fam_metric_order] for s in subset_order], dtype=np.float32)
+        im = ax.imshow(mat_fam, aspect="auto", cmap="YlGnBu", vmin=0.0, vmax=1.0)
+        ax.set_title(model_titles[key])
+        ax.set_xticks(range(len(fam_metric_labels)))
+        ax.set_xticklabels(fam_metric_labels, rotation=20, ha="right")
+        ax.set_yticks(range(len(subset_order)))
+        ax.set_yticklabels(subset_order)
+        for i in range(mat_fam.shape[0]):
+            for j in range(mat_fam.shape[1]):
+                ax.text(j, i, f"{mat_fam[i, j]:.2f}", ha="center", va="center", color="black", fontsize=7)
+    fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.02, pad=0.02)
+    fig.suptitle("Subset family classification probes (U/R/S grasp check; frozen encoders + linear probes)", y=0.99)
+    fig.subplots_adjust(bottom=0.15, wspace=0.28, hspace=0.30)
+    _savefig(out_dir / "subset_family_probe_heatmaps_four_models.png")
+
     # CSV summaries
     with (out_dir / "fused_frozen_four_models_task_summary.csv").open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
@@ -801,10 +868,40 @@ def test_plot_fused_confusions_four_models_higher_order():
 
     with (out_dir / "fused_frozen_four_models_subset_predictors.csv").open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["model", "subset", "pid10_acc", "y_u1_r2", "y_r12_r2", "y_r123_r2", "y_s12_3_r2"])
+        writer.writerow(
+            [
+                "model",
+                "subset",
+                "pid10_acc",
+                "family3_acc",
+                "family3_macro_f1",
+                "u_f1",
+                "r_f1",
+                "s_f1",
+                "y_u1_r2",
+                "y_r12_r2",
+                "y_r123_r2",
+                "y_s12_3_r2",
+            ]
+        )
         for k in geo_keys:
             for r in subset_probe[k]:
-                writer.writerow([k, r["subset"], r["pid10_acc"], r["y_u1_r2"], r["y_r12_r2"], r["y_r123_r2"], r["y_s12_3_r2"]])
+                writer.writerow(
+                    [
+                        k,
+                        r["subset"],
+                        r["pid10_acc"],
+                        r["family3_acc"],
+                        r["family3_macro_f1"],
+                        r["u_f1"],
+                        r["r_f1"],
+                        r["s_f1"],
+                        r["y_u1_r2"],
+                        r["y_r12_r2"],
+                        r["y_r123_r2"],
+                        r["y_s12_3_r2"],
+                    ]
+                )
 
     with (out_dir / "fused_frozen_four_models_training_curves.csv").open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["model", "stream", "step", "loss"])
@@ -815,3 +912,219 @@ def test_plot_fused_confusions_four_models_higher_order():
     # Sanity checks
     for k in geo_keys:
         assert np.isfinite(float(evals[k]["pid10_acc"]))
+
+
+def test_main_results_four_models_repeated_seed_summary():
+    """
+    Main-results quality upgrade:
+    - repeated runs across generator worlds and optimization seeds
+    - compact, decision-focused metrics
+    - mean/std/95% CI instead of single-run leaderboard snapshots
+
+    This is intentionally CSV-first. It avoids generating the full diagnostics stack
+    and writes a compact uncertainty-aware summary for the main results document.
+    """
+    out_dir = _ensure_plot_dir()
+
+    # Keep this modest for local CPU runs; increase repeats/steps for final reporting.
+    repeats = 3
+    data_seeds = [2201, 2202, 2203][:repeats]
+    train_seeds = [71, 72, 73][:repeats]
+    probe_train_shuffles = [101, 102, 103][:repeats]
+    probe_test_shuffles = [201, 202, 203][:repeats]
+
+    model_titles = {
+        "model_a_unimodal_simclr_sum": "A: 3x unimodal SimCLR",
+        "model_b_pairwise_infonce_sum": "B: pairwise InfoNCE sum",
+        "model_c_triangle_like": "C: TRIANGLE",
+        "model_d_confu_style": "D: ConFu",
+    }
+    primary_metrics = [
+        "pid10_acc",
+        "family3_acc",
+        "r_recall_mean",
+        "r_to_s_leakage_mean",
+        "mean_matched_rs_centroid_cos",
+    ]
+    supplemental_metrics = [
+        "mean_matched_rs_nc_acc",
+        "y_r12_r2",
+        "y_r123_r2",
+        "y_s12_3_r2",
+    ]
+
+    raw_rows: List[Dict[str, float]] = []
+    for trial_idx, (data_seed, train_seed, shuf_tr, shuf_te) in enumerate(
+        zip(data_seeds, train_seeds, probe_train_shuffles, probe_test_shuffles), start=1
+    ):
+        data_cfg = PIDDatasetConfig(
+            d=32,
+            m=8,
+            sigma=0.45,
+            rho_choices=(0.2, 0.5, 0.8),
+            hop_choices=(1, 2, 3, 4),
+            seed=data_seed,
+            deleakage_fit_samples=1024,
+        )
+        ssl_gen = PIDSar3DatasetGenerator(data_cfg)
+        probe_train_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": data_cfg.seed}))
+        probe_test_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": data_cfg.seed}))
+        probe_train = _balanced_batch(probe_train_gen, n_per_pid=260, shuffle_seed=shuf_tr, return_aux=True)
+        probe_test = _balanced_batch(probe_test_gen, n_per_pid=140, shuffle_seed=shuf_te, return_aux=True)
+
+        enc_cfg = SSLEncoderConfig(
+            input_dim=data_cfg.d,
+            encoder_hidden_dim=96,
+            representation_dim=48,
+            projector_hidden_dim=96,
+            projector_dim=48,
+        )
+        base_train_cfg = SSLTrainConfig(
+            lr=1e-3,
+            weight_decay=1e-5,
+            batch_size=192,
+            steps=140,
+            temperature=0.2,
+            device="cpu",
+            seed=train_seed,
+            triangle_reg_weight=0.15,
+            confu_pair_weight=0.5,
+            confu_fused_weight=0.5,
+        )
+
+        unimodal_models, _ = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, base_train_cfg)
+        Xtr_a = _concat_unimodal_frozen(unimodal_models, probe_train)
+        Xte_a = _concat_unimodal_frozen(unimodal_models, probe_test)
+
+        model_b, _ = _train_trimodal_objective(ssl_gen, enc_cfg, base_train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce")
+        Xtr_b = _concat_trimodal_frozen(model_b, probe_train)
+        Xte_b = _concat_trimodal_frozen(model_b, probe_test)
+
+        model_c, _ = _train_trimodal_objective(ssl_gen, enc_cfg, base_train_cfg, "triangle_exact", "triangle_exact")
+        Xtr_c = _concat_trimodal_frozen(model_c, probe_train)
+        Xte_c = _concat_trimodal_frozen(model_c, probe_test)
+
+        model_d, _ = _train_trimodal_objective(ssl_gen, enc_cfg, base_train_cfg, "confu_style", "confu_style")
+        Xtr_d = _concat_trimodal_frozen(model_d, probe_train)
+        Xte_d = _concat_trimodal_frozen(model_d, probe_test)
+
+        ytr_pid = probe_train["pid_id"].astype(np.int64)
+        yte_pid = probe_test["pid_id"].astype(np.int64)
+        evals = {
+            "model_a_unimodal_simclr_sum": _evaluate_all_tasks(Xtr_a, probe_train, Xte_a, probe_test),
+            "model_b_pairwise_infonce_sum": _evaluate_all_tasks(Xtr_b, probe_train, Xte_b, probe_test),
+            "model_c_triangle_like": _evaluate_all_tasks(Xtr_c, probe_train, Xte_c, probe_test),
+            "model_d_confu_style": _evaluate_all_tasks(Xtr_d, probe_train, Xte_d, probe_test),
+        }
+        geoms = {
+            "model_a_unimodal_simclr_sum": _compute_geometry_diagnostics(Xtr_a, ytr_pid, Xte_a, yte_pid),
+            "model_b_pairwise_infonce_sum": _compute_geometry_diagnostics(Xtr_b, ytr_pid, Xte_b, yte_pid),
+            "model_c_triangle_like": _compute_geometry_diagnostics(Xtr_c, ytr_pid, Xte_c, yte_pid),
+            "model_d_confu_style": _compute_geometry_diagnostics(Xtr_d, ytr_pid, Xte_d, yte_pid),
+        }
+
+        for model_key in model_titles:
+            ev = evals[model_key]
+            g = geoms[model_key]
+            cm = ev["_pid_cm"]  # type: ignore[index]
+            cm_metrics = _pid_confusion_failure_metrics(cm)
+            row: Dict[str, float] = {
+                "trial_idx": float(trial_idx),
+                "data_seed": float(data_seed),
+                "ssl_train_seed": float(train_seed),
+                "probe_train_shuffle_seed": float(shuf_tr),
+                "probe_test_shuffle_seed": float(shuf_te),
+                "model": 0.0,  # placeholder for typed dict
+                "pid10_acc": float(ev["pid10_acc"]),
+                "family3_acc": float(ev["family3_acc"]),
+                "y_r12_r2": float(ev["y_r12_r2"]),
+                "y_r123_r2": float(ev["y_r123_r2"]),
+                "y_s12_3_r2": float(ev["y_s12_3_r2"]),
+                "mean_matched_rs_centroid_cos": float(np.mean(g["rs_pair_centroid_cos"])),
+                "mean_matched_rs_nc_acc": float(np.mean(g["rs_pair_accs"])),
+            }
+            row.update(cm_metrics)
+            row["model"] = model_key  # type: ignore[assignment]
+            raw_rows.append(row)
+
+    # Write per-trial rows (useful for appendix and debugging variance).
+    raw_fieldnames = [
+        "trial_idx",
+        "data_seed",
+        "ssl_train_seed",
+        "probe_train_shuffle_seed",
+        "probe_test_shuffle_seed",
+        "model",
+        *primary_metrics,
+        *supplemental_metrics,
+        "r_recall_r12",
+        "r_recall_r13",
+        "r_recall_r23",
+        "r_recall_r123",
+    ]
+    with (out_dir / "main_results_four_models_seeded_trials.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=raw_fieldnames)
+        writer.writeheader()
+        for row in raw_rows:
+            writer.writerow(row)
+
+    # Aggregate per model x metric.
+    summary_rows: List[Dict[str, float]] = []
+    for model_key in model_titles:
+        model_rows = [r for r in raw_rows if str(r["model"]) == model_key]
+        for metric in primary_metrics + supplemental_metrics:
+            stats = _mean_ci95([float(r[metric]) for r in model_rows])
+            summary_row: Dict[str, float] = {
+                "model": 0.0,  # placeholder for typed dict
+                "metric": 0.0,  # placeholder for typed dict
+                "n_trials": stats["n"],
+                "mean": stats["mean"],
+                "std": stats["std"],
+                "se": stats["se"],
+                "ci95_low": stats["ci95_low"],
+                "ci95_high": stats["ci95_high"],
+            }
+            summary_row["model"] = model_key  # type: ignore[assignment]
+            summary_row["metric"] = metric  # type: ignore[assignment]
+            summary_rows.append(summary_row)
+
+    with (out_dir / "main_results_four_models_seeded_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["model", "metric", "n_trials", "mean", "std", "se", "ci95_low", "ci95_high"],
+        )
+        writer.writeheader()
+        for row in summary_rows:
+            writer.writerow(row)
+
+    # Main-results figure: compact error-bar panel for decision metrics only.
+    fig, axes = plt.subplots(1, len(primary_metrics), figsize=(20.0, 4.8))
+    x = np.arange(len(model_titles))
+    model_keys = list(model_titles.keys())
+    colors = ["#4c78a8", "#f58518", "#54a24b", "#e45756"]
+    pretty = {
+        "pid10_acc": "PID-10 acc",
+        "family3_acc": "Family-3 acc",
+        "r_recall_mean": "mean R recall",
+        "r_to_s_leakage_mean": "mean R->S leakage",
+        "mean_matched_rs_centroid_cos": "mean matched R/S centroid cos",
+    }
+    summary_map = {(str(r["model"]), str(r["metric"])): r for r in summary_rows}
+    for ax, metric in zip(axes, primary_metrics):
+        means = [float(summary_map[(k, metric)]["mean"]) for k in model_keys]
+        errs = [float(summary_map[(k, metric)]["ci95_high"]) - float(summary_map[(k, metric)]["mean"]) for k in model_keys]
+        ax.bar(x, means, color=colors, alpha=0.9)
+        ax.errorbar(x, means, yerr=errs, fmt="none", ecolor="black", elinewidth=1.2, capsize=3)
+        ax.set_xticks(x)
+        ax.set_xticklabels(["A", "B", "C", "D"])
+        ax.set_title(pretty[metric], fontsize=10)
+        ax.grid(axis="y", alpha=0.25)
+        if metric in ("r_to_s_leakage_mean", "mean_matched_rs_centroid_cos"):
+            ax.set_ylabel("lower is better")
+        else:
+            ax.set_ylabel("higher is better")
+    fig.suptitle("Main results (4 models): repeated-seed summary with 95% CIs", y=1.02)
+    fig.tight_layout()
+    _savefig(out_dir / "main_results_four_models_seeded_summary.png")
+
+    assert len(raw_rows) == repeats * 4

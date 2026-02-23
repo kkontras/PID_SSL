@@ -16,7 +16,7 @@ Key patterns (from `fused_frozen_four_models_subset_predictors.csv`):
 
 - `PID-10` accuracy improves strongly from 1 -> 2 -> 3 modalities for all models.
 - TRIANGLE is strongest on fused `x123` PID-10 (`0.658`).
-- ConFu-style (fusion-head) is strongest on fused `x123` for `y_r123` and `y_s12_3` in this run.
+- ConFu is strongest on fused `x123` for `y_r123` and `y_s12_3` in this run.
 
 ### 6.6 What Still Looks Weird (and Why That Can Happen)
 
@@ -60,7 +60,7 @@ Main tuning conclusions:
 
 - **Yes, hyperparameters matter and should be tuned per method.**
 - **TRIANGLE is especially sensitive to temperature and training budget.**
-- **ConFu-style is sensitive to pair-vs-fused weighting**, and different settings favor different targets.
+- **ConFu is sensitive to pair-vs-fused weighting**, and different settings favor different targets.
 - **Directional predictive hybrid is sensitive to `directional_pred_weight`**: larger weight helps `y_s12_3` recoverability but can hurt PID-10 classification.
 - A single shared hyperparameter point is not sufficient for a fair comparison.
 - The reduced sweep is useful for direction finding, but **final method ranking should use a longer run with explicit tuning selection**.
@@ -102,8 +102,8 @@ Sources:
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | A: 3x unimodal SimCLR | `temp=0.1` | **0.316** | **0.145** | **0.155** | **0.258** | **0.174** | -0.005 |
 | B: pairwise InfoNCE | `temp=0.1` | 0.297 | 0.121 | 0.129 | 0.225 | 0.152 | -0.023 |
-| C: TRIANGLE exact | `temp=0.2` | 0.308 | 0.135 | 0.143 | 0.201 | 0.172 | **0.020** |
-| D: ConFu fusion-head | `temp=0.1`, pair/fused=`0.25/0.75` | 0.279 | 0.098 | 0.105 | 0.177 | 0.110 | 0.004 |
+| C: TRIANGLE | `temp=0.2` | 0.308 | 0.135 | 0.143 | 0.201 | 0.172 | **0.020** |
+| D: ConFu | `temp=0.1`, pair/fused=`0.25/0.75` | 0.279 | 0.098 | 0.105 | 0.177 | 0.110 | 0.004 |
 | E: directional predictive hybrid | `temp=0.4`, `directional_pred_weight=0.5` | 0.305 | 0.131 | 0.138 | 0.210 | 0.158 | 0.015 |
 
 #### Table 9. Selected Per-Target `y_*` Classification Results (held-out test, frozen `x123`)

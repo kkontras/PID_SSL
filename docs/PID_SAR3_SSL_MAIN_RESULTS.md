@@ -28,6 +28,79 @@ Implementation:
 
 - `tests/test_pid_sar3_ssl_fused_confusions.py`
 
+### 6.1.1 Main-Results Reporting Contract (New)
+
+To reduce “leaderboard dump” behavior, the main results are now defined as a small set of decision metrics reported with uncertainty across repeated runs, not a single seed snapshot.
+
+Main-results requirements:
+
+- report repeated runs across dataset worlds and optimization seeds (not one run)
+- report mean and 95% CI for the primary metrics
+- keep one primary ranking target and a small number of failure-mode metrics
+- move tuning sweeps and broad diagnostic tables to `docs/PID_SAR3_SSL_APPENDIX_ABLATIONS.md`
+
+Primary decision metrics (current fused comparison stage):
+
+- downstream task score for the declared primary benchmark (when available in the active harness)
+- redundancy recall (`R` rows in PID confusion)
+- `R -> S` leakage from PID confusions
+- matched `R/S` centroid overlap (geometry pathology metric)
+
+Implementation artifact (repeated-seed summary):
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/main_results_four_models_seeded_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/main_results_four_models_seeded_trials.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/main_results_four_models_seeded_summary.png`
+
+### 6.1.2 Repeated-Seed Snapshot (Quick CPU Run, `n=3`)
+
+We ran the new repeated-seed summary harness (`test_main_results_four_models_repeated_seed_summary`) on February 23, 2026 in a short CPU regime (`3` dataset worlds / optimization seeds, `140` SSL steps). This is not the final benchmark, but it is enough to replace single-seed claims with uncertainty-aware summaries.
+
+Primary metrics (mean [95% CI]):
+
+| Model | PID-10 acc | Family-3 acc | mean `R` recall | mean `R -> S` leakage | mean matched `R/S` centroid cos |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A: 3x unimodal SimCLR | 0.569 [0.555, 0.584] | 0.566 [0.552, 0.579] | 0.546 [0.520, 0.573] | 0.201 [0.183, 0.220] | 0.769 [0.724, 0.813] |
+| B: pairwise InfoNCE | 0.527 [0.521, 0.533] | 0.560 [0.558, 0.562] | 0.520 [0.509, 0.532] | 0.200 [0.179, 0.221] | 0.921 [0.902, 0.939] |
+| C: TRIANGLE | 0.657 [0.647, 0.668] | 0.606 [0.581, 0.631] | 0.642 [0.627, 0.657] | 0.186 [0.154, 0.217] | 0.936 [0.912, 0.960] |
+| D: ConFu | 0.529 [0.512, 0.547] | 0.557 [0.551, 0.562] | 0.508 [0.476, 0.539] | 0.202 [0.188, 0.217] | 0.928 [0.909, 0.948] |
+
+What this changes in the interpretation:
+
+- **TRIANGLE remains strongest in this short regime** on `PID-10` and `R` recall, and it also has the lowest mean `R -> S` leakage among the four in this run.
+- **Unimodal SimCLR still has much lower matched `R/S` centroid overlap** than the cross-modal methods (better geometry on this pathology metric), so the story is not a single scalar ranking.
+- **Pairwise InfoNCE and ConFu are close on several summary metrics** in this short regime, which is exactly the kind of claim that should be reported with intervals rather than one-run tables.
+
+Short-run caveat:
+
+- The supplementary synergy proxy `R²(y_s12_3)` remains highly unstable and strongly negative in this configuration (large variance across the `n=3` runs), so it should stay out of headline ranking claims in the main text.
+
+### 6.1.3 Lead Readout: Do The Encoders Capture U / R / S?
+
+Before showing PID-10 confusions, the main results should lead with a subset-based family classification probe on frozen features:
+
+- subsets: `x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`
+- metrics: `Family-3` accuracy, `Family-3` macro-F1, and one-vs-rest `F1` for `U`, `R`, `S`
+- purpose: answer the direct representation question first ("what does each subset encode about unique/redundancy/synergy families?")
+
+Artifacts (4-model fused comparison):
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/subset_family_probe_heatmaps_four_models.png`
+- `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_four_models_subset_predictors.csv`
+
+This readout should be presented before PID-10 leaderboards because it is a cleaner representation-level diagnostic and makes the U/R/S tradeoffs visible without collapsing them into one class label metric.
+
+Quick snapshot from the current 4-model fused run (`x123` subset only; full subset grid is in the heatmap/CSV above):
+
+| Model | Family-3 acc (`x123`) | Family-3 macro-F1 (`x123`) | `U` F1 (`x123`) | `R` F1 (`x123`) | `S` F1 (`x123`) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A: 3x unimodal SimCLR | 0.586 | 0.580 | 0.609 | 0.620 | 0.510 |
+| B: pairwise InfoNCE | 0.567 | 0.560 | 0.608 | 0.602 | 0.469 |
+| C: TRIANGLE | 0.619 | 0.611 | 0.636 | 0.664 | 0.533 |
+| D: ConFu | 0.589 | 0.582 | 0.583 | 0.634 | 0.530 |
+
+This table is intentionally not the full story. The full subset matrix (`x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`) is the point of the diagnostic, because it shows which methods improve specifically when more modalities are exposed.
+
 ### 6.2 Core Comparison (2 Models, Fused Frozen Encoders)
 
 Models:
@@ -77,7 +150,7 @@ We compare four methods under the same fused frozen protocol:
 1. `A`: 3x unimodal SimCLR
 2. `B`: pairwise InfoNCE sum (pairwise SimCLR/NT-Xent)
 3. `C`: TRIANGLE (area contrastive; closer to the paper's core similarity than the earlier proxy)
-4. `D`: ConFu-style (fusion-head; trainable pair-fusion heads + fused-pair-to-third contrastive terms)
+4. `D`: ConFu (trainable pair-fusion heads + fused-pair-to-third contrastive terms)
 
 Related papers:
 
@@ -105,13 +178,13 @@ Sources:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | A: 3x unimodal SimCLR | 0.580 | 0.590 | 0.729 | 0.582 | 0.398 | 0.430 | -0.252 |
 | B: pairwise InfoNCE | 0.555 | 0.567 | 0.911 | 0.604 | 0.103 | 0.365 | -0.635 |
-| C: TRIANGLE (area contrastive) | 0.658 | 0.619 | 0.947 | 0.614 | 0.389 | 0.387 | -0.677 |
-| D: ConFu-style (fusion-head) | 0.548 | 0.589 | 0.924 | 0.547 | 0.273 | 0.475 | -0.459 |
+| C: TRIANGLE | 0.658 | 0.619 | 0.947 | 0.614 | 0.389 | 0.387 | -0.677 |
+| D: ConFu | 0.548 | 0.589 | 0.924 | 0.547 | 0.273 | 0.475 | -0.459 |
 
 What matters:
 
 - **TRIANGLE** is best on `PID-10` / `Family-3` in this regime.
-- **ConFu-style (fusion-head)** is strongest on `R²(y_r123)` and `R²(y_s12_3)` among the four.
+- **ConFu** is strongest on `R²(y_r123)` and `R²(y_s12_3)` among the four.
 - **Unimodal SimCLR** remains surprisingly strong and is best on `R²(y_r12)` in this run.
 - All methods still exhibit the `Rij <-> Sij->k` confusion pathology.
 
@@ -124,7 +197,7 @@ From PID confusion matrices (rows `R12/R13/R23/R123`):
 - TRIANGLE: avg `R` recall `0.686`, `R -> S` leakage `0.136` (best)
 - Unimodal SimCLR: avg `R` recall `0.575`
 - Pairwise InfoNCE: avg `R` recall `0.542`
-- ConFu-style (fusion-head): avg `R` recall `0.533`
+- ConFu: avg `R` recall `0.533`
 
 This confirms the earlier poor shared-information results were largely caused by the split protocol, not only by the SSL objective choice.
 
@@ -161,8 +234,8 @@ Methods:
 
 1. `A`: 3x unimodal SimCLR
 2. `B`: pairwise InfoNCE
-3. `C`: TRIANGLE exact (area contrastive)
-4. `D`: ConFu-style (fusion-head)
+3. `C`: TRIANGLE (area contrastive)
+4. `D`: ConFu
 5. `E`: directional predictive hybrid (`[h_i,h_j] -> h_k`)
 
 Primary downstream artifacts (regression version, kept as supplementary):
@@ -237,8 +310,8 @@ Sources:
 | --- | ---: | ---: | ---: |
 | A: 3x unimodal SimCLR | 0.520 | 0.518 | 0.514 |
 | B: pairwise InfoNCE | 0.628 | 0.649 | 0.640 |
-| C: TRIANGLE exact | 0.643 | 0.655 | 0.653 |
-| D: ConFu fusion-head | 0.647 | 0.599 | 0.640 |
+| C: TRIANGLE | 0.643 | 0.655 | 0.653 |
+| D: ConFu | 0.647 | 0.599 | 0.640 |
 
 Rotation-level highlights:
 
@@ -250,8 +323,8 @@ What this clarifies:
 
 - This benchmark is much closer to the intended multimodal question than PID-label classification or latent `y_*` probes alone.
 - **Cross-modal methods now clearly outperform unimodal SimCLR** on the true pair->target task (A is near-random on the normalized scale).
-- **TRIANGLE exact is the strongest method across two of the three rotations** (`13->2`, `12->3`) when reporting macro-F1 directly.
-- **ConFu fusion-head** is competitive and strongest on one rotation (`23->1`).
+- **TRIANGLE is the strongest method across two of the three rotations** (`13->2`, `12->3`) when reporting macro-F1 directly.
+- **ConFu** is competitive and strongest on one rotation (`23->1`).
 - **Pairwise InfoNCE** is consistently strong and clearly above unimodal SimCLR on all three rotations.
 
 #### Table 7b. All Source->Target Rotations (macro-F1, A-D only)

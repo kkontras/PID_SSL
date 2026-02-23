@@ -1,45 +1,128 @@
 # PID-SAR-3++ SSL Main Results
 
-This document reports the main SSL results for PID-SAR-3++ using a same-world evaluation split, frozen encoders, and chance-corrected downstream metrics. Supplementary ablations and legacy analyses are moved to `docs/PID_SAR3_SSL_APPENDIX_ABLATIONS.md`.
+This document reports the current SSL results after adding a compositional dataset mode and a dataset-side difficulty ladder. The main purpose of this revision is to establish a benchmarkable regime first, then place the earlier strict single-atom results in that context.
 
 ## 6. SSL Results (Main Results)
 
-### 6.1 Main Result (What Matters)
+### 6.1 Main Result (Dataset First)
 
-Across three complementary validations, the same conclusion appears.
+The central result of this revision is a dataset result, not a model ranking result.
 
-1. In the primary source->target benchmark, the rotated `pair->heldout` tasks (`23->1`, `13->2`, `12->3`) are near chance under Cohen's kappa (\(\kappa\approx 0\)) for all methods.
-2. Retrieval (which is closer to the contrastive training objective) confirms that the encoders preserve strong instance alignment for self and overcomplete tasks, but not for `pair->heldout` transfer.
-3. Frozen-decoder reconstruction with both linear and nonlinear decoders improves easy settings, but `pair->heldout` reconstruction remains below baseline (negative macro \(R^2\)).
+1. The original single-atom generator yields a severe `pair->heldout` pathology under exact-instance retrieval: raw observations are near random, even at very low noise.
+2. A compositional dataset mode (multi-atom summation + shared backbone) produces a clearly solvable retrieval regime under the same metric.
+3. This gives a practical difficulty ladder for rerunning SSL model comparisons in a controlled way, instead of comparing objectives on a pathological benchmark.
 
-The main scientific conclusion is therefore not a model ranking claim. It is that the current regime does not yet produce robust cross-modal transfer to a heldout modality in a chance-corrected or reconstruction-based evaluation.
+The immediate conclusion is that the previous strict benchmark remains scientifically useful as a stress test, but it is not an appropriate starting point for objective comparison under exact retrieval and heldout-modality transfer.
 
-### 6.2 Evaluation Protocol (Condensed)
+### 6.2 Evaluation Setup (Condensed)
 
-All results here use a same-world split: SSL training and downstream probing share the same dataset seed, while probe train/test examples are disjoint samples from that same world. This avoids cross-seed dictionary changes from contaminating the evaluation.
-
-Encoders are frozen. For source subsets, we concatenate the corresponding frozen modality embeddings. Unless otherwise noted, uncertainty is reported as mean \(\pm\) standard error, with \(\mathrm{SE}=s/\sqrt{n}\).
-
-### 6.3 Primary Benchmark: Source->Target Prediction (Cohen's \(\kappa\))
-
-For each source->target task, we predict the raw target modality dimension-wise after train-median binarization and report the macro average of per-dimension Cohen's kappa,
+We use frozen-feature downstream evaluations and a same-world split (shared dataset seed for SSL and probes, disjoint train/test samples). For retrieval diagnostics, we report exact-instance retrieval in cosine space using Recall@\(K\),
 \[
-\bar{\kappa}=\frac{1}{D}\sum_{d=1}^{D}\kappa_d,\qquad \kappa=\frac{p_o-p_e}{1-p_e},
+\mathrm{R@}K = \frac{1}{N}\sum_{i=1}^{N} \mathbf{1}[\mathrm{rank}_i \le K],
 \]
-where \(D\) is the target dimensionality, \(p_o\) is observed agreement, and \(p_e\) is chance agreement.
+and mean reciprocal rank,
+\[
+\mathrm{MRR} = \frac{1}{N}\sum_{i=1}^{N} \frac{1}{\mathrm{rank}_i}.
+\]
 
-#### Table 7a. Grouped Summary Of The Source->Target Matrix (macro-\(\kappa\), 5-fold means)
+Unless otherwise noted, `pair->heldout` refers to the rotated tasks `23->1`, `13->2`, `12->3`.
 
-| Model | self `1->1/2->2/3->3` | single cross-modal (`1->2`, etc.) | pair->heldout target (`23->1`, `13->2`, `12->3`) | pair->member target (`12->1`, etc.) | `123->target` |
+### 6.3 Dataset Difficulty Ladder (Primary Result For This Revision)
+
+We added a backward-compatible compositional dataset mode with the following new controls:
+
+- `composition_mode` (`single_atom` / `multi_atom`)
+- `active_atoms_per_sample`
+- `shared_backbone_gain`
+- `shared_backbone_tied_projection`
+- `synergy_deleak_lambda`
+
+The ladder below evaluates **RAW exact-instance retrieval** (no learned encoder) to isolate benchmarkability before rerunning full SSL comparisons.
+
+Artifacts:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/dataset_difficulty_ladder_raw_retrieval.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/dataset_difficulty_ladder_raw_retrieval_grouped.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/dataset_difficulty_ladder_raw_retrieval.png`
+
+Random baseline for `Recall@1` with `n=1800` gallery items is `1/1800 ≈ 0.00056`.
+
+#### Table 6a. Ladder Definition (dataset-side knobs)
+
+| Level | Setting | `sigma` | `active_atoms` | `shared_gain` | shared proj tied? | `synergy_deleak_lambda` |
+| --- | --- | ---: | ---: | ---: | --- | ---: |
+| L0 | `single_atom_strict` | 0.45 | 1 | 0.0 | no | 1.0 |
+| L1 | `single_atom_low_noise` | 0.05 | 1 | 0.0 | no | 1.0 |
+| L2 | `compositional_easy` | 0.03 | 4 | 2.5 | yes | 0.5 |
+| L3 | `compositional_medium` | 0.08 | 3 | 1.2 | yes | 0.75 |
+| L4 | `compositional_hard` | 0.15 | 2 | 0.6 | no | 1.0 |
+
+#### Table 6b. RAW Retrieval Across The Difficulty Ladder (group means, Recall@1)
+
+| Level | pair->heldout | pair->member | `123->target` |
+| --- | ---: | ---: | ---: |
+| L0 `single_atom_strict` | 0.0006 | 0.9563 | 0.5646 |
+| L1 `single_atom_low_noise` | 0.0007 | 0.8767 | 0.4943 |
+| L2 `compositional_easy` | 0.3856 | 0.9924 | 0.9002 |
+| L3 `compositional_medium` | 0.1383 | 0.9825 | 0.7926 |
+| L4 `compositional_hard` | 0.0007 | 0.9170 | 0.4980 |
+
+Main interpretation of the ladder:
+
+- `L0` and `L1` confirm the pathology: lowering noise alone does not make `pair->heldout` exact retrieval benchmarkable.
+- `L2` provides a clean solvable anchor (`pair->heldout` `Recall@1 ≈ 0.386`, far above random `≈ 0.00056`).
+- `L3` is still solvable but materially harder (`pair->heldout` `Recall@1 ≈ 0.138`).
+- `L4` collapses back to near-random `pair->heldout` retrieval, while easier groups remain strong.
+
+This ladder is the correct starting point for the next model reruns: it lets us compare objectives while controlling dataset difficulty explicitly.
+
+### 6.4 Strict Single-Atom Pathology Diagnostics (L0/L1)
+
+Before introducing the ladder, we ran targeted diagnostics on the strict single-atom generator to test whether the observed failure was simply due to noise or mixed-atom supervision.
+
+Artifacts:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/pair_to_heldout_retrieval_applicability_low_noise.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/pair_to_heldout_retrieval_applicability_low_noise.png`
+- `test_outputs/pid_sar3_ssl_fused_confusions/pair_to_heldout_retrieval_applicability_low_noise_redundancy_train_only.csv`
+
+#### Table 6c. Low-Noise (`sigma=0.05`) `pair->heldout` Retrieval, Applicable Split (mean Recall@1 over rotated tasks)
+
+| Model | full-mixture SSL train | redundancy-only SSL train |
+| --- | ---: | ---: |
+| RAW: observations | 0.0000 | 0.0005 |
+| A: 3x unimodal SimCLR | 0.0023 | 0.0009 |
+| B: pairwise InfoNCE | 0.0005 | 0.0009 |
+| C: TRIANGLE | 0.0009 | 0.0005 |
+| D: ConFu | 0.0005 | 0.0005 |
+
+Key diagnosis:
+
+- Low noise does not fix the strict single-atom `pair->heldout` retrieval pathology.
+- Restricting SSL training to redundancy atoms does not produce a consistent improvement.
+- The raw-observation baseline is itself near random, which shows the issue is not only optimization failure.
+
+### 6.5 Current Strict-Baseline Model Results (Reference Only, L0-Style Regime)
+
+The results below remain the current reference tables for the strict single-atom style benchmark. They are retained because they are still useful for stress testing and failure-mode analysis, but they should not be treated as the first benchmark to optimize against.
+
+#### 6.5.1 Source->Target Prediction (Cohen's \(\kappa\), 5-fold)
+
+For the source->target benchmark, we predict thresholded raw target coordinates and report macro Cohen's kappa,
+\[
+\bar{\kappa}=\frac{1}{D}\sum_{d=1}^{D}\kappa_d, \qquad \kappa=\frac{p_o-p_e}{1-p_e}.
+\]
+
+##### Table 7a. Grouped Summary Of The Source->Target Matrix (macro-\(\kappa\), 5-fold means)
+
+| Model | self `1->1/2->2/3->3` | single cross-modal | pair->heldout target | pair->member target | `123->target` |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | A: 3x unimodal SimCLR | 0.659 | 0.014 | 0.020 | 0.646 | 0.634 |
 | B: pairwise InfoNCE | 0.554 | 0.013 | 0.017 | 0.539 | 0.524 |
 | C: TRIANGLE | 0.536 | 0.010 | 0.014 | 0.521 | 0.507 |
 | D: ConFu | 0.558 | 0.009 | 0.013 | 0.545 | 0.532 |
 
-The grouped average for model \(m\) and task group \(G\) is \(\bar{\kappa}_{m,G}=|G|^{-1}\sum_{t\in G}\kappa(m,t)\).
-
-#### Table 7. Rotated Pair->Heldout Targets (macro-\(\kappa\), 5-fold mean \(\pm\) SE)
+##### Table 7. Rotated Pair->Heldout Targets (macro-\(\kappa\), 5-fold mean \(\pm\) SE)
 
 | Model | `23->1` \(\kappa\) | `13->2` \(\kappa\) | `12->3` \(\kappa\) |
 | --- | ---: | ---: | ---: |
@@ -48,9 +131,7 @@ The grouped average for model \(m\) and task group \(G\) is \(\bar{\kappa}_{m,G}
 | C: TRIANGLE | 0.014 ± 0.003 | 0.009 ± 0.005 | 0.019 ± 0.003 |
 | D: ConFu | 0.015 ± 0.003 | 0.012 ± 0.002 | 0.012 ± 0.003 |
 
-Interpretation: all four methods are near chance on the discriminative cross-modal tasks under a chance-corrected metric.
-
-#### Table 7b. Main Result Matrix: All Source->Target Tasks (macro-\(\kappa\), 5-fold means)
+##### Table 7b. Main Result Matrix: All Source->Target Tasks (macro-\(\kappa\), 5-fold means)
 
 Cell colors use a fixed threshold at \(\kappa=0.25\): green for \(\kappa>0.25\), red for \(\kappa\le 0.25\).
 
@@ -89,47 +170,18 @@ Cell colors use a fixed threshold at \(\kappa=0.25\): green for \(\kappa>0.25\),
   </tbody>
 </table>
 
-### 6.4 Retrieval Validation (Frozen Embeddings, Instance Retrieval)
+#### 6.5.2 Strict-Baseline Retrieval And Reconstruction (compact summaries)
 
-To test what the contrastive encoders preserve without forcing a coordinate decoder, we evaluate source->target retrieval in frozen embedding space. For a query embedding, the positive is the matched sample in the target gallery. We report Recall@\(K\),
-\(\mathrm{R@}K = N^{-1}\sum_i \mathbf{1}[\mathrm{rank}_i \le K]\), and mean reciprocal rank, \(\mathrm{MRR}=N^{-1}\sum_i \mathrm{rank}_i^{-1}\).
+Retrieval (single-run frozen-embedding diagnostic, strict baseline):
 
-This retrieval benchmark is currently a single-run diagnostic (same-world setting), so we use it for structure and failure analysis rather than final ranking.
-
-#### Retrieval Summary (group means, Recall@1)
-
-| Model | self | single cross-modal | pair->heldout | pair->member | `123->target` |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 1.000 | 0.001 | 0.001 | 0.582 | 0.168 |
-| B: pairwise InfoNCE | 1.000 | 0.000 | 0.001 | 0.037 | 0.022 |
-| C: TRIANGLE | 1.000 | 0.000 | 0.001 | 0.441 | 0.144 |
-| D: ConFu | 1.000 | 0.000 | 0.000 | 0.037 | 0.009 |
-
-#### Retrieval Focused Slice (rotated `pair->heldout`, Recall@1)
-
-| Model | `23->1` | `13->2` | `12->3` |
+| Model | pair->heldout `R@1` | pair->member `R@1` | `123->target` `R@1` |
 | --- | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.002 | 0.000 | 0.000 |
-| B: pairwise InfoNCE | 0.001 | 0.001 | 0.001 |
-| C: TRIANGLE | 0.001 | 0.001 | 0.001 |
-| D: ConFu | 0.000 | 0.000 | 0.001 |
+| A: 3x unimodal SimCLR | 0.001 | 0.582 | 0.168 |
+| B: pairwise InfoNCE | 0.001 | 0.037 | 0.022 |
+| C: TRIANGLE | 0.001 | 0.441 | 0.144 |
+| D: ConFu | 0.000 | 0.037 | 0.009 |
 
-Retrieval therefore supports the same core conclusion as Table 7: the hard cross-modal transfer slice is not solved, even when evaluated in an objective-aligned way.
-
-### 6.5 Frozen-Decoder Reconstruction (Raw Target Modalities)
-
-We next test whether richer decoders can recover the heldout modality from frozen encoder features. We train multi-output decoders on frozen source features and reconstruct the raw target modality vector. We report macro \(R^2\),
-\[
-\bar{R}^2 = \frac{1}{D}\sum_{d=1}^{D} R_d^2,
-\]
-where \(R_d^2=1-\sum_i(y_{id}-\hat y_{id})^2 / \sum_i(y_{id}-\bar y_d)^2\). The baseline predictor (train-mean target) gives \(R^2\approx 0\); negative values indicate worse-than-baseline reconstruction.
-
-Decoders:
-
-- `Ridge`: linear multi-output regression
-- `MLP`: nonlinear multi-output regression (frozen encoders, trainable decoder only)
-
-#### Reconstruction Summary (group means, macro \(R^2\))
+Frozen-decoder reconstruction (strict-style regime, 5-fold, macro \(R^2\); pair-source subsets only):
 
 | Decoder | Model | pair->heldout target | pair->member target | `123->target` |
 | --- | --- | ---: | ---: | ---: |
@@ -142,90 +194,17 @@ Decoders:
 | MLP | C: TRIANGLE | -0.131 | 0.249 | 0.181 |
 | MLP | D: ConFu | -0.120 | 0.274 | 0.204 |
 
-#### Reconstruction Focused Slice (rotated `pair->heldout`, macro \(R^2\), 5-fold mean \(\pm\) SE)
+These strict-baseline tables remain useful as a stress test. However, the ladder in Section `6.3` shows they are not the right starting point for objective comparison under exact retrieval.
 
-| Decoder | Model | `23->1` | `13->2` | `12->3` |
-| --- | --- | ---: | ---: | ---: |
-| Ridge | A: 3x unimodal SimCLR | -0.232 ± 0.018 | -0.237 ± 0.011 | -0.231 ± 0.008 |
-| Ridge | B: pairwise InfoNCE | -0.248 ± 0.007 | -0.246 ± 0.012 | -0.259 ± 0.013 |
-| Ridge | C: TRIANGLE | -0.238 ± 0.011 | -0.264 ± 0.011 | -0.247 ± 0.008 |
-| Ridge | D: ConFu | -0.223 ± 0.009 | -0.246 ± 0.008 | -0.244 ± 0.009 |
-| MLP | A: 3x unimodal SimCLR | -0.140 ± 0.004 | -0.142 ± 0.005 | -0.139 ± 0.008 |
-| MLP | B: pairwise InfoNCE | -0.126 ± 0.004 | -0.129 ± 0.008 | -0.125 ± 0.009 |
-| MLP | C: TRIANGLE | -0.134 ± 0.005 | -0.132 ± 0.010 | -0.126 ± 0.004 |
-| MLP | D: ConFu | -0.110 ± 0.005 | -0.125 ± 0.006 | -0.125 ± 0.003 |
+### 6.6 Rerun Plan (From Benchmarkable To Hard)
 
-Main reconstruction takeaway: a nonlinear decoder improves the hard `pair->heldout` slice relative to linear decoding (less negative \(R^2\)), but the frozen encoders still do not support baseline-beating heldout-modality reconstruction in this regime.
+The next model reruns should proceed along the ladder rather than directly on `L0`.
 
-### 6.6 Compact Representation Sanity Check (U/R/S Family Probe)
+1. Rerun the 4-model retrieval benchmark on `L2` and `L3` first (same evaluation code, new dataset config).
+2. Add a learned frozen-feature `pair->target` retrieval adapter and repeat `L2 -> L4`.
+3. Rerun the source->target \(\kappa\) and reconstruction tables on the chosen benchmark level (likely `L3` first).
+4. Only then revisit `L0/L1` as strict stress tests and pathology probes.
 
-As a representation-level sanity check, we evaluate a frozen linear probe on the `x123` subset for 3-way PID-family prediction (Unique / Redundancy / Synergy), reporting accuracy and Cohen's \(\kappa\).
+### 6.7 Summary
 
-| Model | Family-3 acc (`x123`) | Family-3 \(\kappa\) (`x123`) |
-| --- | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.580 | 0.363 |
-| B: pairwise InfoNCE | 0.568 | 0.344 |
-| C: TRIANGLE | 0.619 | 0.420 |
-| D: ConFu | 0.589 | 0.375 |
-
-This sanity check shows that the encoders do capture PID-family structure, but Tables 7, retrieval, and reconstruction show that this does not yet translate into strong heldout-modality transfer.
-
-### 6.7 Pathology Diagnosis (Low-Noise + Redundancy-Only Training)
-
-To test whether the `pair->heldout` failure is merely a noise problem, we ran a low-noise diagnostic with `sigma=0.05` and split the rotated tasks into `applicable` vs `non_applicable` PID atoms under the single-atom generator. We also repeated the diagnostic with SSL training restricted to redundancy atoms only (`R12/R13/R23/R123`).
-
-Diagnostic artifacts:
-
-- `test_outputs/pid_sar3_ssl_fused_confusions/pair_to_heldout_retrieval_applicability_low_noise.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/pair_to_heldout_retrieval_applicability_low_noise.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/pair_to_heldout_retrieval_applicability_low_noise_redundancy_train_only.csv`
-
-The exact-instance retrieval baseline is extremely strict here: with `n=1800` gallery items, random `Recall@1` is approximately `1/1800 = 0.00056`.
-
-#### Low-noise pathology summary (mean over rotated `pair->heldout` tasks, Recall@1)
-
-| Model | Full-mixture train, applicable | Redundancy-only train, applicable |
-| --- | ---: | ---: |
-| RAW: observations | 0.0000 | 0.0005 |
-| A: 3x unimodal SimCLR | 0.0023 | 0.0009 |
-| B: pairwise InfoNCE | 0.0005 | 0.0009 |
-| C: TRIANGLE | 0.0009 | 0.0005 |
-| D: ConFu | 0.0005 | 0.0005 |
-
-Main diagnosis:
-
-- Lowering observation noise does **not** rescue exact `pair->heldout` retrieval.
-- Restricting SSL training to redundancy atoms does **not** produce a clear improvement on applicable `pair->heldout` retrieval.
-- The `RAW` baseline is also near-random, which indicates the current exact-retrieval formulation is itself a poor proxy for recoverability in the single-atom generator (not only a learned-representation failure).
-
-This supports the interpretation that the present pathology is a combination of dataset structure (single-atom samples, many inapplicable cases) and evaluation mismatch (exact instance retrieval with simple pair fusion), not just optimization failure.
-
-### 6.8 Dataset Redesign Sanity (Compositional Easy Mode)
-
-To establish a benchmarkable starting point, we added a compositional dataset mode (multi-atom samples with summation) and an optional shared backbone term. The goal is not to define the final benchmark difficulty, but to first confirm that the retrieval task can be made solvable under the current exact-instance metric.
-
-In the current sanity configuration we use:
-
-- `composition_mode = multi_atom`
-- `active_atoms_per_sample = 4`
-- `shared_backbone_gain = 2.5`
-- `shared_backbone_tied_projection = True`
-- `sigma = 0.03`
-- `synergy_deleak_lambda = 0.5`
-
-Sanity artifacts:
-
-- `test_outputs/pid_sar3_ssl_fused_confusions/compositional_easy_raw_retrieval_sanity.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/compositional_easy_raw_retrieval_sanity.png`
-
-Under this configuration, **RAW exact-instance retrieval becomes clearly solvable** (no learned encoder; observations only):
-
-- random `Recall@1` is `1/1800 ≈ 0.00056`
-- rotated `pair->heldout` mean `Recall@1` is `0.429` (RAW)
-- `123->target` mean `Recall@1` is `0.919` (RAW)
-
-This gives a practical difficulty anchor: we now have a dataset regime where retrieval is not pathologically impossible, and we can progressively increase difficulty (reduce shared gain, untie shared projection, increase de-leakage, increase noise, reduce active atoms) while tracking where each objective breaks.
-
-### 6.9 Summary
-
-The results section is intentionally centered on one question: do frozen encoders support robust cross-modal transfer to a heldout modality? Under three different validations (chance-corrected prediction, retrieval, and reconstruction), the answer is currently no. The next iteration should target the `pair->heldout` slice directly in model selection and training.
+This revision changes the role of the main results section: it now first establishes a benchmarkable dataset regime and a controlled difficulty ladder, then places the earlier strict single-atom model results in context. The key next step is to rerun the model comparisons on `L2/L3`, where the task is demonstrably solvable but not trivial.

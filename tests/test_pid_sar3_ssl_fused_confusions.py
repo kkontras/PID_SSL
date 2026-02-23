@@ -2367,3 +2367,215 @@ def test_compositional_easy_raw_retrieval_sanity():
 
     # We only need a clear proof-of-solvability. Threshold is intentionally modest.
     assert mean_pair_heldout_r1 > max(10.0 * random_r1, 0.01), (mean_pair_heldout_r1, random_r1)
+
+
+def test_dataset_difficulty_ladder_raw_retrieval():
+    """
+    Dataset-side difficulty ladder for RAW exact-instance retrieval.
+
+    This isolates benchmarkability before rerunning full SSL comparisons. We track
+    how pair->heldout retrieval changes as we move from the original single-atom
+    strict generator to compositional variants of increasing difficulty.
+    """
+    out_dir = _ensure_plot_dir()
+
+    ladder = [
+        {
+            "level": "L0",
+            "name": "single_atom_strict",
+            "cfg": PIDDatasetConfig(
+                d=32, m=8, sigma=0.45, seed=3901,
+                rho_choices=(0.2, 0.5, 0.8), hop_choices=(1, 2, 3, 4),
+                deleakage_fit_samples=1024,
+                composition_mode="single_atom",
+                active_atoms_per_sample=1,
+                shared_backbone_gain=0.0,
+                synergy_deleak_lambda=1.0,
+            ),
+        },
+        {
+            "level": "L1",
+            "name": "single_atom_low_noise",
+            "cfg": PIDDatasetConfig(
+                d=32, m=8, sigma=0.05, seed=3902,
+                rho_choices=(0.2, 0.5, 0.8), hop_choices=(1, 2, 3, 4),
+                deleakage_fit_samples=1024,
+                composition_mode="single_atom",
+                active_atoms_per_sample=1,
+                shared_backbone_gain=0.0,
+                synergy_deleak_lambda=1.0,
+            ),
+        },
+        {
+            "level": "L2",
+            "name": "compositional_easy",
+            "cfg": PIDDatasetConfig(
+                d=32, m=8, sigma=0.03, seed=3903,
+                rho_choices=(0.5, 0.8), hop_choices=(1, 2),
+                deleakage_fit_samples=1024,
+                composition_mode="multi_atom",
+                active_atoms_per_sample=4,
+                shared_backbone_gain=2.5,
+                shared_backbone_tied_projection=True,
+                synergy_deleak_lambda=0.5,
+            ),
+        },
+        {
+            "level": "L3",
+            "name": "compositional_medium",
+            "cfg": PIDDatasetConfig(
+                d=32, m=8, sigma=0.08, seed=3904,
+                rho_choices=(0.2, 0.5, 0.8), hop_choices=(1, 2, 3),
+                deleakage_fit_samples=1024,
+                composition_mode="multi_atom",
+                active_atoms_per_sample=3,
+                shared_backbone_gain=1.2,
+                shared_backbone_tied_projection=True,
+                synergy_deleak_lambda=0.75,
+            ),
+        },
+        {
+            "level": "L4",
+            "name": "compositional_hard",
+            "cfg": PIDDatasetConfig(
+                d=32, m=8, sigma=0.15, seed=3905,
+                rho_choices=(0.2, 0.5, 0.8), hop_choices=(1, 2, 3, 4),
+                deleakage_fit_samples=1024,
+                composition_mode="multi_atom",
+                active_atoms_per_sample=2,
+                shared_backbone_gain=0.6,
+                shared_backbone_tied_projection=False,
+                synergy_deleak_lambda=1.0,
+            ),
+        },
+    ]
+
+    source_map = {"12": ("x1", "x2"), "13": ("x1", "x3"), "23": ("x2", "x3"), "123": ("x1", "x2", "x3")}
+    target_keys = {"1": "x1", "2": "x2", "3": "x3"}
+    pair_heldout = {("12", "3"), ("13", "2"), ("23", "1")}
+
+    rows: List[Dict[str, float]] = []
+    group_rows: List[Dict[str, float]] = []
+    for item in ladder:
+        level = str(item["level"])
+        name = str(item["name"])
+        gen = PIDSar3DatasetGenerator(item["cfg"])  # type: ignore[arg-type]
+        batch = _balanced_batch(gen, n_per_pid=180, shuffle_seed=959, return_aux=True)
+        pid_ids = batch["pid_id"].astype(np.int64)
+        X = _concat_raw(batch)
+        parts = _split_modalities_from_concat(X)
+
+        per_task: List[Dict[str, float]] = []
+        for src, src_keys in source_map.items():
+            query = _fused_query_from_parts(parts, src_keys)
+            for tgt, tgt_key in target_keys.items():
+                gallery = parts[tgt_key]
+                rank = _retrieval_metrics_from_scores(_retrieval_scores(query, gallery))["rank"].astype(np.int64)  # type: ignore[index]
+                task_key = (src, tgt)
+                if task_key in pair_heldout:
+                    split_masks = {
+                        "all": np.ones_like(pid_ids, dtype=bool),
+                        "applicable": np.isin(pid_ids, _applicable_pid_ids_for_pair_to_target(src, tgt)),
+                    }
+                    split_masks["non_applicable"] = ~split_masks["applicable"]
+                else:
+                    split_masks = {"all": np.ones_like(pid_ids, dtype=bool)}
+                for split_name, mask in split_masks.items():
+                    met = _retrieval_metrics_from_rank_subset(rank, mask)
+                    row = {
+                        "level": 0.0,
+                        "setting": 0.0,
+                        "source": 0.0,
+                        "target": 0.0,
+                        "split": 0.0,
+                        "n": float(met["n"]),
+                        "recall_at_1": float(met["recall_at_1"]),
+                        "recall_at_5": float(met["recall_at_5"]),
+                        "mrr": float(met["mrr"]),
+                        "random_recall_at_1": float(1.0 / rank.shape[0]),
+                        "sigma": float(item["cfg"].sigma),  # type: ignore[index]
+                        "active_atoms_per_sample": float(item["cfg"].active_atoms_per_sample),  # type: ignore[index]
+                        "shared_backbone_gain": float(item["cfg"].shared_backbone_gain),  # type: ignore[index]
+                        "shared_backbone_tied_projection": float(1.0 if item["cfg"].shared_backbone_tied_projection else 0.0),  # type: ignore[index]
+                        "synergy_deleak_lambda": float(item["cfg"].synergy_deleak_lambda),  # type: ignore[index]
+                    }
+                    row["level"] = level  # type: ignore[assignment]
+                    row["setting"] = name  # type: ignore[assignment]
+                    row["source"] = src  # type: ignore[assignment]
+                    row["target"] = tgt  # type: ignore[assignment]
+                    row["split"] = split_name  # type: ignore[assignment]
+                    rows.append(row)
+                    per_task.append(row)
+
+        # grouped summaries for all-split rows
+        all_rows = [r for r in per_task if str(r["split"]) == "all"]
+        def _g(src: str, tgt: str) -> str:
+            if len(src) == 2 and tgt not in src:
+                return "pair_to_heldout"
+            if len(src) == 2 and tgt in src:
+                return "pair_to_member"
+            if len(src) == 3:
+                return "triple_to_target"
+            return "other"
+        for gname in ("pair_to_heldout", "pair_to_member", "triple_to_target"):
+            xs = [r for r in all_rows if _g(str(r["source"]), str(r["target"])) == gname]
+            if not xs:
+                continue
+            group_rows.append(
+                {
+                    "level": level,
+                    "setting": name,
+                    "group": gname,
+                    "recall_at_1_mean": float(np.mean([float(r["recall_at_1"]) for r in xs])),
+                    "recall_at_5_mean": float(np.mean([float(r["recall_at_5"]) for r in xs])),
+                    "mrr_mean": float(np.mean([float(r["mrr"]) for r in xs])),
+                    "random_recall_at_1": float(xs[0]["random_recall_at_1"]),
+                }
+            )
+
+    with (out_dir / "dataset_difficulty_ladder_raw_retrieval.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "level", "setting", "source", "target", "split", "n", "recall_at_1", "recall_at_5", "mrr",
+                "random_recall_at_1", "sigma", "active_atoms_per_sample", "shared_backbone_gain",
+                "shared_backbone_tied_projection", "synergy_deleak_lambda",
+            ],
+        )
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(r)
+
+    with (out_dir / "dataset_difficulty_ladder_raw_retrieval_grouped.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f, fieldnames=["level", "setting", "group", "recall_at_1_mean", "recall_at_5_mean", "mrr_mean", "random_recall_at_1"]
+        )
+        writer.writeheader()
+        for r in group_rows:
+            writer.writerow(r)
+
+    fig, axes = plt.subplots(1, 3, figsize=(16.8, 4.8), sharex=True)
+    order = [str(item["level"]) for item in ladder]
+    labels = [f'{item["level"]}\\n{item["name"]}' for item in ladder]
+    grouped_df = {(str(r["level"]), str(r["group"])): r for r in group_rows}
+    for ax, group_name, color in zip(
+        axes,
+        ["pair_to_heldout", "pair_to_member", "triple_to_target"],
+        ["#e45756", "#54a24b", "#4c78a8"],
+    ):
+        ys = [float(grouped_df[(lev, group_name)]["recall_at_1_mean"]) for lev in order]
+        ax.plot(np.arange(len(order)), ys, marker="o", linewidth=2.0, color=color)
+        rand = float(group_rows[0]["random_recall_at_1"])
+        ax.axhline(rand, color="black", linestyle="--", linewidth=1.0, alpha=0.6)
+        ax.set_title(group_name.replace("_", " "))
+        ax.set_xticks(np.arange(len(order)))
+        ax.set_xticklabels(labels)
+        ax.grid(axis="y", alpha=0.25)
+        ax.set_ylabel("RAW Recall@1")
+    fig.suptitle("Dataset difficulty ladder (RAW exact-instance retrieval)", y=1.02)
+    fig.tight_layout()
+    _savefig(out_dir / "dataset_difficulty_ladder_raw_retrieval.png")
+
+    # Sanity: the easy compositional level should be clearly solvable on pair->heldout.
+    easy_pair = [r for r in group_rows if str(r["level"]) == "L2" and str(r["group"]) == "pair_to_heldout"][0]
+    assert float(easy_pair["recall_at_1_mean"]) > 0.05

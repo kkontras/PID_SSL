@@ -1104,10 +1104,6 @@ def test_plot_single_atom_correctness_validation():
     }
 
     atom_order = ["U1", "R12", "R123", "S12->3"]
-    atom_rows_by_cond = {
-        "low": {a: [r for r in rows_low if r["atom"] == a] for a in atom_order},
-        "high": {a: [r for r in rows_high if r["atom"] == a] for a in atom_order},
-    }
     cls_atom_rows = {
         probe: {
             cond: {a: [r for r in cls_rows[probe][cond] if r["atom"] == a] for a in atom_order}
@@ -1115,35 +1111,42 @@ def test_plot_single_atom_correctness_validation():
         }
         for probe in ("logreg", "mlp")
     }
-    fig, axes = plt.subplots(4, 4, figsize=(28.0, 23.0))
     palette = {
         "main": "#4c78a8",
         "control": "#bdbdbd",
         "joint": "#54a24b",
         "gain": "#f58518",
-        "single": "#9c755f",
     }
     atom_labels = {
-        "U1": ["x1 -> y_u1", "x2 -> y_u1 (ctrl)", "x3 -> y_u1 (ctrl)"],
-        "R12": ["x1 -> y_r12", "x2 -> y_r12", "x3 -> y_r12 (ctrl)", "[x1,x2] -> y_r12", "joint gain"],
-        "R123": ["x1 -> y_r123", "x2 -> y_r123", "x3 -> y_r123", "[x1,x2,x3] -> y_r123", "joint gain"],
-        "S12->3": ["x3 -> y_s (target)", "x1 -> y_s", "x2 -> y_s", "[x1,x2] -> y_s", "source joint gain"],
+        "U1": ["x1 -> u1", "x2 -> u1 (ctrl)", "x3 -> u1 (ctrl)"],
+        "R12": ["x1 -> r12", "x2 -> r12", "x3 -> r12 (ctrl)", "[x1,x2] -> r12", "joint gain"],
+        "R123": ["x1 -> r123", "x2 -> r123", "x3 -> r123", "[x123] -> r123", "joint gain"],
+        "S12->3": ["x3 -> s (target)", "x1 -> s", "x2 -> s", "[x1,x2] -> s", "source gain"],
     }
-    cls_xlim: Dict[str, Tuple[float, float]] = {}
-    for atom in atom_order:
-        vals_all = []
-        for probe in ("logreg", "mlp"):
+    def _plot_cls_block(probe_key: str, outfile: str, title: str) -> None:
+        fig, axes = plt.subplots(2, 4, figsize=(27.0, 10.8))
+        cls_xlim: Dict[str, Tuple[float, float]] = {}
+        for atom in atom_order:
+            vals_all = []
             for cond in ("low", "high"):
-                vals_all.extend([r["score"] for r in cls_atom_rows[probe][cond][atom]])
-        vals = np.asarray(vals_all, dtype=np.float32)
-        cls_xlim[atom] = (min(-0.35, float(np.min(vals)) - 0.05), 1.02)
+                vals_all.extend([r["score"] for r in cls_atom_rows[probe_key][cond][atom]])
+            vals = np.asarray(vals_all, dtype=np.float32)
+            cls_xlim[atom] = (min(-0.35, float(np.min(vals)) - 0.05), 1.02)
 
-    cond_specs = [("low", 0.05), ("high", 0.45)]
-    probe_specs = [("logreg", "Logistic regression probe (AUROC)"), ("mlp", "Small supervised MLP probe (AUROC)")]
-    for p_idx, (probe_key, _) in enumerate(probe_specs):
+        cond_specs = [("low", 0.05), ("high", 0.45)]
+        for c_idx, (_cond_key, sigma_val) in enumerate(cond_specs):
+            fig.text(
+                0.25 + 0.5 * c_idx,
+                0.975,
+                f"{'Low-noise' if c_idx == 0 else 'Higher-noise'} block (sigma={sigma_val}, alpha=1.5, rho=0.8, hop=2)",
+                ha="center",
+                va="top",
+                fontsize=12,
+            )
+
         for c_idx, (cond_key, _sigma_val) in enumerate(cond_specs):
             for a_idx, atom in enumerate(atom_order):
-                row = (a_idx // 2) + 2 * p_idx
+                row = a_idx // 2
                 col = (a_idx % 2) + 2 * c_idx
                 ax = axes[row, col]
                 atom_metrics = cls_atom_rows[probe_key][cond_key][atom]
@@ -1151,44 +1154,48 @@ def test_plot_single_atom_correctness_validation():
                 labels = atom_labels[atom]
                 vals = np.array([m["score"] for m in atom_metrics], dtype=np.float32)
 
-            colors = []
-            for lbl in raw_labels:
-                if "control" in lbl:
-                    colors.append(palette["control"])
-                elif "joint gain" in lbl or "source joint gain" in lbl:
-                    colors.append(palette["gain"])
-                elif "[x1,x2" in lbl or "[x1,x2,x3]" in lbl or "source joint" in lbl:
-                    colors.append(palette["joint"])
-                elif "single" in lbl:
-                    colors.append(palette["single"])
-                else:
-                    colors.append(palette["main"])
+                colors = []
+                for lbl in raw_labels:
+                    if "ctrl" in lbl:
+                        colors.append(palette["control"])
+                    elif "gain" in lbl:
+                        colors.append(palette["gain"])
+                    elif "[x1,x2" in lbl or "[x123]" in lbl:
+                        colors.append(palette["joint"])
+                    else:
+                        colors.append(palette["main"])
 
                 y = np.arange(len(labels))
                 ax.barh(y, vals, color=colors, alpha=0.9)
+                ax.axvline(0.5, color="black", linewidth=0.8, alpha=0.5, linestyle="--")  # AUROC chance
                 ax.axvline(0.0, color="black", linewidth=0.8, alpha=0.6)
-                ax.set_title(atom)
+                ax.set_title(atom, fontsize=11)
                 ax.set_yticks(y)
                 ax.set_yticklabels(labels, fontsize=8)
-                ax.set_xlabel("held-out score (AUROC; gain bars = dAUROC)")
-                ax.grid(axis="x", alpha=0.25)
+                ax.set_xlabel("score (AUROC; gain bars = dAUROC)", fontsize=9)
+                ax.grid(axis="x", alpha=0.22)
                 for i, v in enumerate(vals):
-                    pad = 0.02 if v >= 0 else -0.02
-                    ax.text(v + pad, i, f"{v:.2f}", va="center", ha="left" if v >= 0 else "right", fontsize=8)
+                    pad = 0.015 if v >= 0 else -0.015
+                    ax.text(v + pad, i, f"{v:.2f}", va="center", ha="left" if v >= 0 else "right", fontsize=7)
                 ax.invert_yaxis()
                 ax.set_xlim(*cls_xlim[atom])
 
-    # Headers: noise shown once per column block; probe family shown once per row block.
-    fig.text(0.25, 0.983, "Low-noise block (sigma=0.05, alpha=1.5, rho=0.8, hop=2)", ha="center", va="top", fontsize=12)
-    fig.text(0.75, 0.983, "Higher-noise block (sigma=0.45, alpha=1.5, rho=0.8, hop=2)", ha="center", va="top", fontsize=12)
-    fig.text(0.012, 0.74, "Logistic\nregression\nprobe", ha="left", va="center", fontsize=11)
-    fig.text(0.012, 0.29, "Small\nsupervised\nMLP probe", ha="left", va="center", fontsize=11)
-    fig.add_artist(plt.Line2D([0.5, 0.5], [0.06, 0.965], transform=fig.transFigure, color="0.75", linewidth=1.0))
-    fig.add_artist(plt.Line2D([0.03, 0.985], [0.515, 0.515], transform=fig.transFigure, color="0.75", linewidth=1.0))
+        fig.add_artist(plt.Line2D([0.5, 0.5], [0.07, 0.95], transform=fig.transFigure, color="0.75", linewidth=1.0))
+        fig.suptitle(title, y=0.995)
+        fig.subplots_adjust(hspace=0.42, wspace=0.38, left=0.06, right=0.985, bottom=0.08, top=0.91)
+        fig.savefig(out_dir / outfile, dpi=140, bbox_inches="tight")
+        plt.close(fig)
 
-    fig.suptitle("Single-atom correctness validation: linear vs small-MLP probes under low and higher noise", y=0.995)
-    fig.subplots_adjust(hspace=0.44, wspace=0.42, left=0.08, right=0.985, bottom=0.06, top=0.94)
-    _savefig(out_dir / "single_atom_correctness_validation.png")
+    _plot_cls_block(
+        "logreg",
+        "single_atom_correctness_validation_logreg.png",
+        "Single-atom correctness validation: logistic regression probes (AUROC)",
+    )
+    _plot_cls_block(
+        "mlp",
+        "single_atom_correctness_validation_mlp.png",
+        "Single-atom correctness validation: small supervised MLP probes (AUROC)",
+    )
 
     csv_path = out_dir / "single_atom_correctness_validation.csv"
     with csv_path.open("w", encoding="utf-8") as f:

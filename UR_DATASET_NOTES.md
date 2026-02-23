@@ -82,13 +82,17 @@ This section is ordered by evidential value for validating the generator. First 
 
 ### 3.1 Single-Atom Correctness Validation (Most Important)
 
-![Single-atom correctness validation](test_outputs/pid_sar3/single_atom_correctness_validation.png)
+![Single-atom correctness validation (logistic)](test_outputs/pid_sar3/single_atom_correctness_validation_logreg.png)
 
-*Figure 1. Single-atom correctness validation with linear and small-MLP probes under two noise settings.* Columns are split by noise (left block: `sigma = 0.05`, right block: `sigma = 0.45`), while rows are split by probe family (top half: logistic regression, bottom half: small supervised MLP), with `alpha = 1.5`, `rho = 0.8`, and `hop = 2` fixed in all panels. Each panel corresponds to one atom-only dataset (`U1`, `R12`, `R123`, `S12->3`) and reports atom-aligned held-out classification scores.
+*Figure 1A. Single-atom correctness validation with logistic-regression probes (AUROC).* The left 2x2 block uses low noise (`sigma = 0.05`) and the right 2x2 block uses higher noise (`sigma = 0.45`), with `alpha = 1.5`, `rho = 0.8`, and `hop = 2` fixed. Each panel corresponds to one atom-only dataset (`U1`, `R12`, `R123`, `S12->3`) and reports atom-aligned held-out classification scores.
 
-This is the primary validation figure. If the low-noise block fails, the rest of the diagnostics are not interpretable. The higher-noise block is included to show degradation under noisier observations without changing the task definition, and the MLP row is included to show what a small supervised nonlinear probe can recover beyond a linear classifier.
+![Single-atom correctness validation (small MLP)](test_outputs/pid_sar3/single_atom_correctness_validation_mlp.png)
 
-Figure 1 uses held-out `AUROC` (area under the ROC curve) for binary probe tasks obtained by thresholding each latent target into a binary label. Bars labeled `joint gain` or `source joint gain` report a difference in AUROC relative to the best single-source probe (that is, `ΔAUROC`).
+*Figure 1B. Single-atom correctness validation with a small supervised MLP probe (AUROC).* The panel layout and noise settings are identical to Figure 1A, which allows direct comparison between a linear classifier and a small nonlinear probe.
+
+These are the primary validation figures. If the low-noise block fails in either Figure 1A or Figure 1B, the rest of the diagnostics are not interpretable. The higher-noise block is included to show degradation under noisier observations without changing the task definition.
+
+Figures 1A and 1B use held-out `AUROC` (area under the ROC curve) for binary probe tasks obtained by thresholding each latent target into a binary label. Bars labeled `joint gain` or `source gain` report a difference in AUROC relative to the best single-source probe (that is, `ΔAUROC`).
 
 For completeness, the table below reports low-noise held-out regression performance using `R²`. In this section, `R²` denotes the held-out coefficient of determination of a probe model (fit on a train split, evaluated on a test split). If $\hat{y}^{\mathrm{te}}$ is the probe prediction on the test split and $y^{\mathrm{te}}$ is the corresponding target, then
 
@@ -102,7 +106,7 @@ Values near `1` indicate strong predictability, while values near `0` (or negati
 
 The bar labels follow a strict convention: `input -> target`. For example, `x1 -> y_u1` means a probe predicts the latent-derived target `y_u1` from view `x1`, and `[x1,x2] -> y_r12` means a probe predicts `y_r12` from the concatenated views `x1` and `x2`. Labels ending in `(ctrl)` are controls and should stay near chance because that view should not carry the target information. Bars named `joint gain` or `source joint gain` are improvements over the best single-view source and are included only to show whether combining sources helps.
 
-Read Figure 1 row-wise within each probe family, and compare the same atom across the low-noise and higher-noise column blocks. For `U1`, `x1 -> y_u1` should be high and both control bars should stay near chance. For `R12`, `x1 -> y_r12` and `x2 -> y_r12` should both be high, `x3 -> y_r12 (ctrl)` should remain low, and `[x1,x2] -> y_r12` should be best. For `R123`, all three single-view bars should be high and `[x1,x2,x3] -> y_r123` should be highest. For `S12->3`, the stable correctness criterion is `x3 -> y_s` (target view), because the synergy latent is projected into view 3.
+Read Figures 1A and 1B row-wise, comparing the same atom across the low-noise and higher-noise column blocks, and then compare Figure 1A (linear classifier) against Figure 1B (small nonlinear probe). For `U1`, `x1 -> y_u1` should be high and both control bars should stay near chance. For `R12`, `x1 -> y_r12` and `x2 -> y_r12` should both be high, `x3 -> y_r12 (ctrl)` should remain low, and `[x1,x2] -> y_r12` should be best. For `R123`, all three single-view bars should be high and `[x123] -> y_r123` should be highest. For `S12->3`, the stable correctness criterion is `x3 -> y_s` (target view), because the synergy latent is projected into view 3.
 
 | Atom-only validation set | Metric | Score | Expected behavior |
 | --- | --- | ---: | --- |
@@ -115,7 +119,7 @@ Read Figure 1 row-wise within each probe family, and compare the same atom acros
 | `R123` | `R²(y_r123 | [x1,x2,x3])` | 0.905 | Joint decoder is strongest. |
 | `S12->3` | `R²(y_s12_3 | x3)` | 0.960 | Near-ceiling target-view decode for the synergy-generated latent. |
 
-Table values summarize the low-noise regression reference (the same low-noise setting used in the left block of Figure 1).
+Table values summarize the low-noise regression reference (the same low-noise setting used in the left blocks of Figures 1A and 1B).
 
 ### 3.2 Dependence Proxy Signatures (`D(i,j)`) for U/R Structure
 

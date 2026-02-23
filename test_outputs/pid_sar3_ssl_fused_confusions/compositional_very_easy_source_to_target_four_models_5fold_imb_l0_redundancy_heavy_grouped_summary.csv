@@ -1,0 +1,13 @@
+model,model_label,group,macro_f1_mean,macro_kappa_mean
+A,A: 3x unimodal SimCLR,pair_to_member_target,0.8793262002003431,0.7588709340026157
+A,A: 3x unimodal SimCLR,pair_to_heldout_target,0.8368647387941982,0.6739688867095097
+A,A: 3x unimodal SimCLR,triple_to_target,0.8774104035246738,0.7548734199212127
+B,B: pairwise InfoNCE,pair_to_member_target,0.8528201490642786,0.7063195843075971
+B,B: pairwise InfoNCE,pair_to_heldout_target,0.8327803261718505,0.6663885821791123
+B,B: pairwise InfoNCE,triple_to_target,0.8526740897846637,0.7060092444730487
+C,C: TRIANGLE,pair_to_member_target,0.8576984614682179,0.7156752675913786
+C,C: TRIANGLE,pair_to_heldout_target,0.8317941860887657,0.6638930254118183
+C,C: TRIANGLE,triple_to_target,0.8578491313576935,0.7160493716292454
+D,D: ConFu,pair_to_member_target,0.846342162929984,0.69320514912786
+D,D: ConFu,pair_to_heldout_target,0.8253660468913914,0.6517605714902946
+D,D: ConFu,triple_to_target,0.8466489851459912,0.6939148053741023

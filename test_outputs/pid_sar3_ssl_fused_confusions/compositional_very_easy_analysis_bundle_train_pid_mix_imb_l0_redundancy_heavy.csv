@@ -1,0 +1,11 @@
+schedule_tag,pid_id,pid_name,count,probability
+imb_l0_redundancy_heavy,0.0,U1,10.0,0.1
+imb_l0_redundancy_heavy,1.0,U2,10.0,0.1
+imb_l0_redundancy_heavy,2.0,U3,10.0,0.1
+imb_l0_redundancy_heavy,3.0,R12,15.0,0.15
+imb_l0_redundancy_heavy,4.0,R13,15.0,0.15
+imb_l0_redundancy_heavy,5.0,R23,15.0,0.15
+imb_l0_redundancy_heavy,6.0,R123,15.0,0.15
+imb_l0_redundancy_heavy,7.0,S12->3,4.0,0.04
+imb_l0_redundancy_heavy,8.0,S13->2,3.0,0.03
+imb_l0_redundancy_heavy,9.0,S23->1,3.0,0.03

@@ -1,0 +1,2 @@
+output_suffix,train_pid_schedule_name,ssl_steps,probe_n_per_pid,n_folds,train_device
+imb_l0_synergy_heavy,imb_l0_synergy_heavy,480.0,100.0,5.0,cuda

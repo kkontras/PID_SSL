@@ -170,6 +170,36 @@ As a representation-level sanity check, we evaluate a frozen linear probe on the
 
 This sanity check shows that the encoders do capture PID-family structure, but Tables 7, retrieval, and reconstruction show that this does not yet translate into strong heldout-modality transfer.
 
-### 6.7 Summary
+### 6.7 Pathology Diagnosis (Low-Noise + Redundancy-Only Training)
+
+To test whether the `pair->heldout` failure is merely a noise problem, we ran a low-noise diagnostic with `sigma=0.05` and split the rotated tasks into `applicable` vs `non_applicable` PID atoms under the single-atom generator. We also repeated the diagnostic with SSL training restricted to redundancy atoms only (`R12/R13/R23/R123`).
+
+Diagnostic artifacts:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/pair_to_heldout_retrieval_applicability_low_noise.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/pair_to_heldout_retrieval_applicability_low_noise.png`
+- `test_outputs/pid_sar3_ssl_fused_confusions/pair_to_heldout_retrieval_applicability_low_noise_redundancy_train_only.csv`
+
+The exact-instance retrieval baseline is extremely strict here: with `n=1800` gallery items, random `Recall@1` is approximately `1/1800 = 0.00056`.
+
+#### Low-noise pathology summary (mean over rotated `pair->heldout` tasks, Recall@1)
+
+| Model | Full-mixture train, applicable | Redundancy-only train, applicable |
+| --- | ---: | ---: |
+| RAW: observations | 0.0000 | 0.0005 |
+| A: 3x unimodal SimCLR | 0.0023 | 0.0009 |
+| B: pairwise InfoNCE | 0.0005 | 0.0009 |
+| C: TRIANGLE | 0.0009 | 0.0005 |
+| D: ConFu | 0.0005 | 0.0005 |
+
+Main diagnosis:
+
+- Lowering observation noise does **not** rescue exact `pair->heldout` retrieval.
+- Restricting SSL training to redundancy atoms does **not** produce a clear improvement on applicable `pair->heldout` retrieval.
+- The `RAW` baseline is also near-random, which indicates the current exact-retrieval formulation is itself a poor proxy for recoverability in the single-atom generator (not only a learned-representation failure).
+
+This supports the interpretation that the present pathology is a combination of dataset structure (single-atom samples, many inapplicable cases) and evaluation mismatch (exact instance retrieval with simple pair fusion), not just optimization failure.
+
+### 6.8 Summary
 
 The results section is intentionally centered on one question: do frozen encoders support robust cross-modal transfer to a heldout modality? Under three different validations (chance-corrected prediction, retrieval, and reconstruction), the answer is currently no. The next iteration should target the `pair->heldout` slice directly in model selection and training.

@@ -295,13 +295,18 @@ def _split_modalities_from_concat(X: np.ndarray) -> Dict[str, np.ndarray]:
     return {"x1": X[:, :d], "x2": X[:, d : 2 * d], "x3": X[:, 2 * d : 3 * d]}
 
 
-def _train_model_a_unimodal_sum_simclr(gen: PIDSar3DatasetGenerator, enc_cfg: SSLEncoderConfig, train_cfg: SSLTrainConfig) -> Tuple[Dict[str, UnimodalSimCLRModel], List[Dict[str, float]]]:
+def _train_model_a_unimodal_sum_simclr(
+    gen: PIDSar3DatasetGenerator,
+    enc_cfg: SSLEncoderConfig,
+    train_cfg: SSLTrainConfig,
+    pid_schedule: Tuple[int, ...] | None = None,
+) -> Tuple[Dict[str, UnimodalSimCLRModel], List[Dict[str, float]]]:
     aug = VectorAugmenter(VectorAugmentationConfig(jitter_std=0.08, feature_drop_prob=0.08, gain_min=0.92, gain_max=1.08))
     models: Dict[str, UnimodalSimCLRModel] = {}
     rows: List[Dict[str, float]] = []
     for modality in ("x1", "x2", "x3"):
         model = UnimodalSimCLRModel(enc_cfg)
-        hist = train_unimodal_simclr(model, gen, modality, train_cfg, augmenter=aug)
+        hist = train_unimodal_simclr(model, gen, modality, train_cfg, augmenter=aug, pid_schedule=pid_schedule)
         models[modality] = model
         for r in hist:
             rows.append({"model": "sum_3_unimodal_simclr", "stream": modality, **r})
@@ -322,10 +327,11 @@ def _train_trimodal_objective(
     train_cfg: SSLTrainConfig,
     objective: str,
     model_name: str,
+    pid_schedule: Tuple[int, ...] | None = None,
 ) -> Tuple[TriModalSSLModel, List[Dict[str, float]]]:
     model = TriModalSSLModel(enc_cfg)
     cfg = SSLTrainConfig(**{**train_cfg.__dict__, "objective": objective})
-    hist = train_ssl(model, gen, cfg)
+    hist = train_ssl(model, gen, cfg, pid_schedule=pid_schedule)
     rows = [{"model": model_name, "stream": "joint", **r} for r in hist]
     return model, rows
 
@@ -2111,5 +2117,138 @@ def test_pair_to_heldout_retrieval_applicability_low_noise():
     fig.suptitle("Low-noise pair->heldout retrieval pathology (exact-instance, mean over rotations)", y=1.02)
     fig.tight_layout()
     _savefig(out_dir / "pair_to_heldout_retrieval_applicability_low_noise.png")
+
+    assert len(rows) == 5 * 3 * 3
+
+
+def test_pair_to_heldout_retrieval_applicability_low_noise_redundancy_train_only():
+    """
+    Same low-noise pathology diagnostic, but SSL training batches are restricted to
+    redundancy atoms only (R12, R13, R23, R123).
+
+    This tests whether the failure is mainly caused by mixed-atom supervision noise.
+    """
+    out_dir = _ensure_plot_dir()
+    redundancy_only = (3, 4, 5, 6)
+
+    data_cfg = PIDDatasetConfig(
+        d=32,
+        m=8,
+        sigma=0.05,
+        rho_choices=(0.2, 0.5, 0.8),
+        hop_choices=(1, 2, 3, 4),
+        seed=3711,
+        deleakage_fit_samples=1024,
+    )
+    ssl_gen = PIDSar3DatasetGenerator(data_cfg)
+    enc_cfg = SSLEncoderConfig(input_dim=data_cfg.d, encoder_hidden_dim=96, representation_dim=48, projector_hidden_dim=96, projector_dim=48)
+    train_cfg = SSLTrainConfig(
+        lr=1e-3,
+        weight_decay=1e-5,
+        batch_size=192,
+        steps=180,
+        temperature=0.2,
+        device="cpu",
+        seed=131,
+        triangle_reg_weight=0.15,
+        confu_pair_weight=0.5,
+        confu_fused_weight=0.5,
+    )
+
+    unimodal_models, _ = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, train_cfg, pid_schedule=redundancy_only)
+    model_b, _ = _train_trimodal_objective(
+        ssl_gen, enc_cfg, train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce", pid_schedule=redundancy_only
+    )
+    model_c, _ = _train_trimodal_objective(
+        ssl_gen, enc_cfg, train_cfg, "triangle_exact", "triangle_exact", pid_schedule=redundancy_only
+    )
+    model_d, _ = _train_trimodal_objective(
+        ssl_gen, enc_cfg, train_cfg, "confu_style", "confu_style", pid_schedule=redundancy_only
+    )
+
+    probe_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": data_cfg.seed}))
+    probe = _balanced_batch(probe_gen, n_per_pid=180, shuffle_seed=939, return_aux=True)
+    pid_ids = probe["pid_id"].astype(np.int64)
+
+    Xs = {
+        "RAW": _concat_raw(probe),
+        "A": _concat_unimodal_frozen(unimodal_models, probe),
+        "B": _concat_trimodal_frozen(model_b, probe),
+        "C": _concat_trimodal_frozen(model_c, probe),
+        "D": _concat_trimodal_frozen(model_d, probe),
+    }
+    model_labels = {
+        "RAW": "RAW: observations",
+        "A": "A: 3x unimodal SimCLR (R-only train)",
+        "B": "B: pairwise InfoNCE (R-only train)",
+        "C": "C: TRIANGLE (R-only train)",
+        "D": "D: ConFu (R-only train)",
+    }
+    rotations = [("23", "1"), ("13", "2"), ("12", "3")]
+
+    rows: List[Dict[str, float]] = []
+    for mkey, X in Xs.items():
+        parts = _split_modalities_from_concat(X)
+        for src, tgt in rotations:
+            query = _fused_query_from_parts(parts, tuple(f"x{k}" for k in src))
+            gallery = parts[f"x{tgt}"]
+            scores = _retrieval_scores(query, gallery)
+            rank = _retrieval_metrics_from_scores(scores)["rank"].astype(np.int64)  # type: ignore[index]
+
+            applicable_ids = _applicable_pid_ids_for_pair_to_target(src, tgt)
+            m_app = np.isin(pid_ids, applicable_ids)
+            m_non = ~m_app
+            split_metrics = {
+                "all": _retrieval_metrics_from_rank_subset(rank, np.ones_like(pid_ids, dtype=bool)),
+                "applicable": _retrieval_metrics_from_rank_subset(rank, m_app),
+                "non_applicable": _retrieval_metrics_from_rank_subset(rank, m_non),
+            }
+            for split_name, sm in split_metrics.items():
+                rows.append(
+                    {
+                        "model": 0.0,
+                        "model_label": 0.0,
+                        "source": 0.0,
+                        "target": 0.0,
+                        "split": 0.0,
+                        "n": float(sm["n"]),
+                        "recall_at_1": float(sm["recall_at_1"]),
+                        "recall_at_5": float(sm["recall_at_5"]),
+                        "mrr": float(sm["mrr"]),
+                        "random_recall_at_1": float(1.0 / rank.shape[0]),
+                        "applicable_rate": float(np.mean(m_app)),
+                        "train_pid_subset": 0.0,
+                    }
+                )
+                rows[-1]["model"] = mkey  # type: ignore[assignment]
+                rows[-1]["model_label"] = model_labels[mkey]  # type: ignore[assignment]
+                rows[-1]["source"] = src  # type: ignore[assignment]
+                rows[-1]["target"] = tgt  # type: ignore[assignment]
+                rows[-1]["split"] = split_name  # type: ignore[assignment]
+                rows[-1]["train_pid_subset"] = "redundancy_only"  # type: ignore[assignment]
+
+    with (out_dir / "pair_to_heldout_retrieval_applicability_low_noise_redundancy_train_only.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "model",
+                "model_label",
+                "source",
+                "target",
+                "split",
+                "n",
+                "recall_at_1",
+                "recall_at_5",
+                "mrr",
+                "random_recall_at_1",
+                "applicable_rate",
+                "train_pid_subset",
+            ],
+        )
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(r)
 
     assert len(rows) == 5 * 3 * 3

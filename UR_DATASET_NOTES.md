@@ -94,6 +94,17 @@ These are the primary validation figures. If the low-noise block fails in either
 
 Figures 1A and 1B use held-out `AUROC` (area under the ROC curve) for binary probe tasks obtained by thresholding each latent target into a binary label. Bars labeled `joint gain` or `source gain` report a difference in AUROC relative to the best single-source probe (that is, `ΔAUROC`).
 
+Table 1 summarizes a compact subset of the AUROC results shown in Figures 1A and 1B. The columns are chosen to reflect the main visual claims: an aligned probe, a control probe, a joint redundancy probe, a triple-redundancy probe, a target-view synergy probe, and a source-joint synergy probe.
+
+| Noise | Probe | `U1: x1->u1` | `U1 ctrl: x2->u1` | `R12: [x1,x2]->r12` | `R123: [x123]->r123` | `S12->3: x3->s` | `S12->3: [x1,x2]->s` |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| low (`sigma=0.05`) | logistic | 0.998 | 0.469 | 0.966 | 0.968 | 0.992 | 0.509 |
+| low (`sigma=0.05`) | small MLP | 0.998 | 0.547 | 0.956 | 0.953 | 0.988 | 0.509 |
+| higher (`sigma=0.45`) | logistic | 0.967 | 0.537 | 0.912 | 0.944 | 0.736 | 0.568 |
+| higher (`sigma=0.45`) | small MLP | 0.957 | 0.522 | 0.897 | 0.940 | 0.686 | 0.532 |
+
+Table 1 should be read together with Figures 1A and 1B. Aligned probes remain high for `U1`, `R12`, and `R123`, control probes remain near chance (`AUROC ≈ 0.5`), and `x3 -> s` is the stable correctness probe for `S12->3`. Increasing noise degrades aligned probes without changing these qualitative roles.
+
 For completeness, the table below reports low-noise held-out regression performance using `R²`. In this section, `R²` denotes the held-out coefficient of determination of a probe model (fit on a train split, evaluated on a test split). If $\hat{y}^{\mathrm{te}}$ is the probe prediction on the test split and $y^{\mathrm{te}}$ is the corresponding target, then
 
 ```math
@@ -108,7 +119,7 @@ The bar labels follow a strict convention: `input -> target`. For example, `x1 -
 
 Read Figures 1A and 1B row-wise, comparing the same atom across the low-noise and higher-noise column blocks, and then compare Figure 1A (linear classifier) against Figure 1B (small nonlinear probe). For `U1`, `x1 -> y_u1` should be high and both control bars should stay near chance. For `R12`, `x1 -> y_r12` and `x2 -> y_r12` should both be high, `x3 -> y_r12 (ctrl)` should remain low, and `[x1,x2] -> y_r12` should be best. For `R123`, all three single-view bars should be high and `[x123] -> y_r123` should be highest. For `S12->3`, the stable correctness criterion is `x3 -> y_s` (target view), because the synergy latent is projected into view 3.
 
-| Atom-only validation set | Metric | Score | Expected behavior |
+| Atom-only validation set (regression reference) | Metric | Score | Expected behavior |
 | --- | --- | ---: | --- |
 | `U1` | `R²(y_u1 | x1)` | 0.998 | Near-ceiling decode from the active view. |
 | `U1` | `R²(y_u1 | x2)` / `R²(y_u1 | x3)` (controls) | -0.068 / -0.025 | Inactive views stay near chance. |
@@ -119,7 +130,7 @@ Read Figures 1A and 1B row-wise, comparing the same atom across the low-noise an
 | `R123` | `R²(y_r123 | [x1,x2,x3])` | 0.905 | Joint decoder is strongest. |
 | `S12->3` | `R²(y_s12_3 | x3)` | 0.960 | Near-ceiling target-view decode for the synergy-generated latent. |
 
-Table values summarize the low-noise regression reference (the same low-noise setting used in the left blocks of Figures 1A and 1B).
+Table 2 values summarize the low-noise regression reference (the same low-noise setting used in the left blocks of Figures 1A and 1B).
 
 ### 3.2 Dependence Proxy Signatures (`D(i,j)`) for U/R Structure
 

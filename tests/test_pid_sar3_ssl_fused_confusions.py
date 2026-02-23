@@ -12,7 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
+from sklearn.metrics import accuracy_score, cohen_kappa_score, confusion_matrix, f1_score
 from sklearn.preprocessing import StandardScaler
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -241,6 +241,7 @@ def _evaluate_all_tasks(Xtr: np.ndarray, train_batch: Dict[str, np.ndarray], Xte
     out: Dict[str, float] = {
         "pid10_acc": float(pid_eval["acc"][0]),
         "family3_acc": float(fam_eval["acc"][0]),
+        "family3_kappa": float(cohen_kappa_score(yte_fam, fam_eval["pred"])),  # type: ignore[arg-type]
     }
     for key, mkey in [("y_u1", "mask_y_u1"), ("y_r12", "mask_y_r12"), ("y_r123", "mask_y_r123"), ("y_s12_3", "mask_y_s12_3")]:
         mtr = train_batch[mkey].astype(bool)
@@ -323,6 +324,7 @@ def _evaluate_subset_predictors(
         row: Dict[str, float] = {
             "pid10_acc": float(pid_eval["acc"][0]),
             "family3_acc": float(fam_eval["acc"][0]),
+            "family3_kappa": float(cohen_kappa_score(yte_fam, fam_pred)),
             "family3_macro_f1": float(f1_score(yte_fam, fam_pred, average="macro", zero_division=0)),
             "u_f1": float(f1_score((yte_fam == 0).astype(np.int64), (fam_pred == 0).astype(np.int64), zero_division=0)),
             "r_f1": float(f1_score((yte_fam == 1).astype(np.int64), (fam_pred == 1).astype(np.int64), zero_division=0)),
@@ -791,8 +793,8 @@ def test_plot_fused_confusions_four_models_higher_order():
     _savefig(out_dir / "subset_predictor_heatmaps_four_models.png")
 
     # Family subset classification diagnostics (the most direct U/R/S grasp check).
-    fam_metric_order = ["family3_acc", "family3_macro_f1", "u_f1", "r_f1", "s_f1"]
-    fam_metric_labels = ["Family-3 acc", "Family-3 macro-F1", "U F1", "R F1", "S F1"]
+    fam_metric_order = ["family3_acc", "family3_kappa", "family3_macro_f1", "u_f1", "r_f1", "s_f1"]
+    fam_metric_labels = ["Family-3 acc", "Family-3 kappa", "Family-3 macro-F1", "U F1", "R F1", "S F1"]
     fig, axes = plt.subplots(2, 2, figsize=(18.5, 12.0))
     for ax, key in zip(axes.flat, geo_keys):
         row_map = {str(r["subset"]): r for r in subset_probe[key]}
@@ -874,6 +876,7 @@ def test_plot_fused_confusions_four_models_higher_order():
                 "subset",
                 "pid10_acc",
                 "family3_acc",
+                "family3_kappa",
                 "family3_macro_f1",
                 "u_f1",
                 "r_f1",
@@ -892,6 +895,7 @@ def test_plot_fused_confusions_four_models_higher_order():
                         r["subset"],
                         r["pid10_acc"],
                         r["family3_acc"],
+                        r["family3_kappa"],
                         r["family3_macro_f1"],
                         r["u_f1"],
                         r["r_f1"],
@@ -940,8 +944,8 @@ def test_main_results_four_models_repeated_seed_summary():
         "model_d_confu_style": "D: ConFu",
     }
     primary_metrics = [
-        "pid10_acc",
         "family3_acc",
+        "family3_kappa",
         "r_recall_mean",
         "r_to_s_leakage_mean",
         "mean_matched_rs_centroid_cos",
@@ -1037,6 +1041,7 @@ def test_main_results_four_models_repeated_seed_summary():
                 "model": 0.0,  # placeholder for typed dict
                 "pid10_acc": float(ev["pid10_acc"]),
                 "family3_acc": float(ev["family3_acc"]),
+                "family3_kappa": float(ev["family3_kappa"]),
                 "y_r12_r2": float(ev["y_r12_r2"]),
                 "y_r123_r2": float(ev["y_r123_r2"]),
                 "y_s12_3_r2": float(ev["y_s12_3_r2"]),
@@ -1055,6 +1060,7 @@ def test_main_results_four_models_repeated_seed_summary():
         "probe_train_shuffle_seed",
         "probe_test_shuffle_seed",
         "model",
+        "pid10_acc",
         *primary_metrics,
         *supplemental_metrics,
         "r_recall_r12",
@@ -1103,8 +1109,8 @@ def test_main_results_four_models_repeated_seed_summary():
     model_keys = list(model_titles.keys())
     colors = ["#4c78a8", "#f58518", "#54a24b", "#e45756"]
     pretty = {
-        "pid10_acc": "PID-10 acc",
         "family3_acc": "Family-3 acc",
+        "family3_kappa": "Family-3 kappa",
         "r_recall_mean": "mean R recall",
         "r_to_s_leakage_mean": "mean R->S leakage",
         "mean_matched_rs_centroid_cos": "mean matched R/S centroid cos",

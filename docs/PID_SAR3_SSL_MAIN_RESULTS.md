@@ -6,6 +6,8 @@ This document reports the primary SSL results for PID-SAR-3++. It presents the c
 
 The section numbering below is preserved from the original SSL report to keep table/figure references stable.
 
+Main finding: on the primary source->target downstream benchmark (Section `6.8.1`), **TRIANGLE** is best on the grouped cross-modal pair->heldout-target tasks and wins two of the three rotated pair->target directions, **ConFu** is competitive and wins one rotated direction, **pairwise InfoNCE** is consistently strong, and **unimodal SimCLR** remains near the cross-modal floor despite near-ceiling self/overcomplete predictions.
+
 ### 6.1 Evaluation Protocol (Important Correction)
 
 Earlier comparisons used different dataset seeds for probe-train and probe-test generators. In PID-SAR-3++, changing the dataset seed changes the fixed projection operators, the fixed synergy network, and the de-leakage maps, so cross-seed probing evaluates transfer across different observation dictionaries rather than ordinary generalization to new samples from the same world.
@@ -34,12 +36,12 @@ We ran the repeated-seed summary harness (`test_main_results_four_models_repeate
 
 Secondary diagnostics (mean \(\pm\) SE):
 
-| Model | Family-3 acc | mean `R` recall | mean `R -> S` leakage | mean matched `R/S` centroid cos |
-| --- | ---: | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.566 ± 0.0068 | 0.546 ± 0.0135 | 0.201 ± 0.0094 | 0.769 ± 0.0227 |
-| B: pairwise InfoNCE | 0.560 ± 0.0010 | 0.520 ± 0.0059 | 0.200 ± 0.0108 | 0.921 ± 0.0095 |
-| C: TRIANGLE | 0.606 ± 0.0129 | 0.642 ± 0.0076 | 0.186 ± 0.0162 | 0.936 ± 0.0122 |
-| D: ConFu | 0.557 ± 0.0028 | 0.508 ± 0.0161 | 0.202 ± 0.0072 | 0.928 ± 0.0101 |
+| Model | Family-3 acc | Family-3 \(\kappa\) | mean `R` recall | mean `R -> S` leakage | mean matched `R/S` centroid cos |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A: 3x unimodal SimCLR | 0.566 ± 0.0068 | 0.342 ± 0.0080 | 0.546 ± 0.0135 | 0.201 ± 0.0094 | 0.769 ± 0.0227 |
+| B: pairwise InfoNCE | 0.560 ± 0.0010 | 0.331 ± 0.0012 | 0.520 ± 0.0059 | 0.200 ± 0.0108 | 0.921 ± 0.0095 |
+| C: TRIANGLE | 0.606 ± 0.0129 | 0.401 ± 0.0193 | 0.642 ± 0.0076 | 0.186 ± 0.0162 | 0.936 ± 0.0122 |
+| D: ConFu | 0.557 ± 0.0028 | 0.326 ± 0.0030 | 0.508 ± 0.0161 | 0.202 ± 0.0072 | 0.928 ± 0.0101 |
 
 Interpretation of the secondary diagnostics snapshot:
 
@@ -66,12 +68,12 @@ We place this readout first because it is a direct representation-level diagnost
 
 Quick snapshot from the current 4-model fused run (`x123` subset only; full subset grid is in the heatmap/CSV above):
 
-| Model | Family-3 acc (`x123`) | Family-3 macro-F1 (`x123`) | `U` F1 (`x123`) | `R` F1 (`x123`) | `S` F1 (`x123`) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.586 | 0.580 | 0.609 | 0.620 | 0.510 |
-| B: pairwise InfoNCE | 0.567 | 0.560 | 0.608 | 0.602 | 0.469 |
-| C: TRIANGLE | 0.619 | 0.611 | 0.636 | 0.664 | 0.533 |
-| D: ConFu | 0.589 | 0.582 | 0.583 | 0.634 | 0.530 |
+| Model | Family-3 acc (`x123`) | Family-3 \(\kappa\) (`x123`) | Family-3 macro-F1 (`x123`) | `U` F1 (`x123`) | `R` F1 (`x123`) | `S` F1 (`x123`) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| A: 3x unimodal SimCLR | 0.580 | 0.363 | 0.574 | 0.610 | 0.608 | 0.505 |
+| B: pairwise InfoNCE | 0.567 | 0.344 | 0.560 | 0.608 | 0.602 | 0.469 |
+| C: TRIANGLE | 0.619 | 0.420 | 0.611 | 0.636 | 0.664 | 0.533 |
+| D: ConFu | 0.589 | 0.375 | 0.582 | 0.583 | 0.634 | 0.530 |
 
 This `x123` table is only a compact snapshot. The full subset matrix (`x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`) is the key diagnostic because it shows which methods improve specifically when additional modalities are exposed.
 
@@ -166,6 +168,8 @@ The main downstream benchmark uses modalities directly. Given frozen encoder fea
 
 This design avoids making a hand-crafted latent proxy the primary target. Instead, it asks whether the learned representation supports actual cross-modal prediction.
 
+Main result (one sentence): **TRIANGLE is strongest on the cross-modal pair->heldout-target group on average, ConFu is competitive and wins one rotated direction, pairwise InfoNCE is consistently strong, and unimodal SimCLR remains near the cross-modal floor despite near-ceiling self/overcomplete predictions.**
+
 Presentation order in this section:
 
 - **Figure 14 + Table 7b (the full all-source->target matrix)** are the main benchmark result.
@@ -227,12 +231,12 @@ Sources:
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.csv`
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_overall_rotation_scores.csv`
 
-| Model | `23->1` macro-F1 | `13->2` macro-F1 | `12->3` macro-F1 |
+| Model | `23->1` macro-F1 / \(\kappa\) | `13->2` macro-F1 / \(\kappa\) | `12->3` macro-F1 / \(\kappa\) |
 | --- | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.520 | 0.518 | 0.514 |
-| B: pairwise InfoNCE | 0.628 | 0.649 | 0.640 |
-| C: TRIANGLE | 0.643 | 0.655 | 0.653 |
-| D: ConFu | 0.647 | 0.599 | 0.640 |
+| A: 3x unimodal SimCLR | 0.520 / 0.037 | 0.518 / 0.039 | 0.514 / 0.027 |
+| B: pairwise InfoNCE | 0.628 / 0.261 | 0.649 / 0.296 | 0.640 / 0.283 |
+| C: TRIANGLE | 0.643 / 0.289 | 0.655 / 0.311 | 0.653 / 0.309 |
+| D: ConFu | 0.647 / 0.296 | 0.599 / 0.199 | 0.640 / 0.279 |
 
 Rotation-level highlights:
 
@@ -242,7 +246,7 @@ Rotation-level highlights:
 
 Interpretation of the rotated pair->target slice:
 
-- **Cross-modal methods clearly outperform unimodal SimCLR** on the pair->target tasks (model A remains near the cross-modal floor).
+- **Cross-modal methods clearly outperform unimodal SimCLR** on the pair->target tasks in both macro-F1 and \(\kappa\) (model A remains near the cross-modal floor).
 - **TRIANGLE is the strongest method across two of the three rotations** (`13->2`, `12->3`) when reporting macro-F1 directly.
 - **ConFu** is competitive and strongest on one rotation (`23->1`).
 - **Pairwise InfoNCE** is consistently strong and clearly above unimodal SimCLR on all three rotations.
@@ -250,6 +254,8 @@ Interpretation of the rotated pair->target slice:
 #### Table 7b. Main Result Matrix: All Source->Target Rotations (macro-F1, A-D only)
 
 Source: `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
+
+Current artifact note: the checked-in `7b` source table stores macro-F1 only. The corresponding rotated-slice CSV (`tuned_long_steps_600_pair_to_target_overall_rotation_scores.csv`) stores `macro_kappa`, which is why \(\kappa\) is shown in Table 7 but not yet in Table 7b.
 
 | Source->Target | A | B | C | D |
 | --- | ---: | ---: | ---: | ---: |

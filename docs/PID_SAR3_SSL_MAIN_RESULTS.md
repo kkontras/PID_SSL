@@ -51,32 +51,27 @@ Random baseline for `Recall@1` with `n=1800` gallery items is `1/1800 ≈ 0.0005
 
 | Level | Setting | `sigma` | `active_atoms` | `shared_gain` | shared proj tied? | `synergy_deleak_lambda` |
 | --- | --- | ---: | ---: | ---: | --- | ---: |
-| L0 | `single_atom_strict` | 0.45 | 1 | 0.0 | no | 1.0 |
-| L1 | `single_atom_low_noise` | 0.05 | 1 | 0.0 | no | 1.0 |
+| L0 | `compositional_very_easy` | 0.02 | 5 | 4.0 | yes | 0.25 |
+| L1 | `compositional_easy_plus` | 0.025 | 4 | 3.2 | yes | 0.35 |
 | L2 | `compositional_easy` | 0.03 | 4 | 2.5 | yes | 0.5 |
-| L3 | `compositional_medium` | 0.08 | 3 | 1.2 | yes | 0.75 |
-| L4 | `compositional_hard` | 0.15 | 2 | 0.6 | no | 1.0 |
 
 #### Table 6b. RAW Retrieval Across The Difficulty Ladder (group means, Recall@1)
 
 | Level | pair->heldout | pair->member | `123->target` |
 | --- | ---: | ---: | ---: |
-| L0 `single_atom_strict` | 0.0006 | 0.9563 | 0.5646 |
-| L1 `single_atom_low_noise` | 0.0007 | 0.8767 | 0.4943 |
+| L0 `compositional_very_easy` | 0.6487 | 0.9976 | 0.9624 |
+| L1 `compositional_easy_plus` | 0.5839 | 0.9970 | 0.9511 |
 | L2 `compositional_easy` | 0.3856 | 0.9924 | 0.9002 |
-| L3 `compositional_medium` | 0.1383 | 0.9825 | 0.7926 |
-| L4 `compositional_hard` | 0.0007 | 0.9170 | 0.4980 |
 
 Main interpretation of the ladder:
 
-- `L0` and `L1` confirm the pathology: lowering noise alone does not make `pair->heldout` exact retrieval benchmarkable.
-- `L2` provides a clean solvable anchor (`pair->heldout` `Recall@1 ≈ 0.386`, far above random `≈ 0.00056`).
-- `L3` is still solvable but materially harder (`pair->heldout` `Recall@1 ≈ 0.138`).
-- `L4` collapses back to near-random `pair->heldout` retrieval, while easier groups remain strong.
+- `L0 -> L1 -> L2` provides a clean monotonic progression on `pair->heldout` exact retrieval (`0.649 -> 0.584 -> 0.386` in raw `Recall@1`).
+- All three levels are decisively above random (`≈ 0.00056`) and therefore benchmarkable under the current retrieval metric.
+- `L2` remains challenging enough to be useful as a first nontrivial benchmark level, while `L0/L1` are calibration levels for debugging objectives and probes.
 
 This ladder is the correct starting point for the next model reruns: it lets us compare objectives while controlling dataset difficulty explicitly.
 
-### 6.4 Strict Single-Atom Pathology Diagnostics (L0/L1)
+### 6.4 Strict Single-Atom Pathology Diagnostics
 
 Before introducing the ladder, we ran targeted diagnostics on the strict single-atom generator to test whether the observed failure was simply due to noise or mixed-atom supervision.
 
@@ -102,7 +97,7 @@ Key diagnosis:
 - Restricting SSL training to redundancy atoms does not produce a consistent improvement.
 - The raw-observation baseline is itself near random, which shows the issue is not only optimization failure.
 
-### 6.5 Current Strict-Baseline Model Results (Reference Only, L0-Style Regime)
+### 6.5 Current Strict-Baseline Model Results (Reference Only, Single-Atom Regime)
 
 The results below remain the current reference tables for the strict single-atom style benchmark. They are retained because they are still useful for stress testing and failure-mode analysis, but they should not be treated as the first benchmark to optimize against.
 
@@ -198,13 +193,13 @@ These strict-baseline tables remain useful as a stress test. However, the ladder
 
 ### 6.6 Rerun Plan (From Benchmarkable To Hard)
 
-The next model reruns should proceed along the ladder rather than directly on `L0`.
+The next model reruns should proceed along the compositional ladder first, then be stress-tested on the strict single-atom regime.
 
-1. Rerun the 4-model retrieval benchmark on `L2` and `L3` first (same evaluation code, new dataset config).
-2. Add a learned frozen-feature `pair->target` retrieval adapter and repeat `L2 -> L4`.
-3. Rerun the source->target \(\kappa\) and reconstruction tables on the chosen benchmark level (likely `L3` first).
-4. Only then revisit `L0/L1` as strict stress tests and pathology probes.
+1. Rerun the 4-model retrieval benchmark on `L0`, `L1`, and `L2` (same evaluation code, new dataset config).
+2. Add a learned frozen-feature `pair->target` retrieval adapter and repeat across `L0 -> L2`.
+3. Rerun the source->target \(\kappa\) and reconstruction tables on `L2` first, then back off to `L1` or tighten beyond `L2` as needed.
+4. Keep the strict single-atom diagnostics as a separate pathology/stress-test track.
 
 ### 6.7 Summary
 
-This revision changes the role of the main results section: it now first establishes a benchmarkable dataset regime and a controlled difficulty ladder, then places the earlier strict single-atom model results in context. The key next step is to rerun the model comparisons on `L2/L3`, where the task is demonstrably solvable but not trivial.
+This revision changes the role of the main results section: it now first establishes a benchmarkable dataset regime and a controlled compositional difficulty ladder, then places the earlier strict single-atom model results in context. The key next step is to rerun the model comparisons on `L0/L1/L2`, with `L2` as the first nontrivial benchmark target.

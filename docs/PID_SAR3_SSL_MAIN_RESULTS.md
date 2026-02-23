@@ -49,9 +49,7 @@ Short-run caveat:
 
 ### 6.1.3 Lead Readout: Do The Encoders Capture U / R / S?
 
-Before any PID-label confusion matrix is shown, we report a subset-based family classification probe on frozen features. The probe evaluates subsets `x1`, `x2`, `x3`, `x12`, `x13`, `x23`, and `x123`, and asks whether the representation linearly separates the three PID families (unique, redundancy, synergy).
-
-For clarity, if precision and recall are denoted by \(P\) and \(R\), the class-wise F1 score is \(F_1 = 2PR/(P+R)\). The reported family macro-F1 is the unweighted mean \(\mathrm{macro\text{-}F1} = \frac{1}{3}\sum_{c\in\{U,R,S\}}F_1^{(c)}\), and the `U`/`R`/`S` columns report one-vs-rest scores \(F_1^{(c)}\) for each family.
+Before any PID-label confusion matrix is shown, we report a subset-based family classification probe on frozen features. The probe evaluates subsets `x1`, `x2`, `x3`, `x12`, `x13`, `x23`, and `x123`, and asks whether the representation linearly separates the three PID families (unique, redundancy, synergy). We report family accuracy and Cohen's \(\kappa\), with \(\kappa = (p_o-p_e)/(1-p_e)\) and \(\kappa \approx 0\) at chance.
 
 Artifacts (4-model fused comparison):
 
@@ -62,25 +60,18 @@ We place this readout first because it is a direct representation-level diagnost
 
 Quick snapshot from the current 4-model fused run (`x123` subset only; full subset grid is in the heatmap/CSV above):
 
-| Model | Family-3 acc (`x123`) | Family-3 \(\kappa\) (`x123`) | Family-3 macro-F1 (`x123`) | `U` F1 (`x123`) | `R` F1 (`x123`) | `S` F1 (`x123`) |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.580 | 0.363 | 0.574 | 0.610 | 0.608 | 0.505 |
-| B: pairwise InfoNCE | 0.567 | 0.344 | 0.560 | 0.608 | 0.602 | 0.469 |
-| C: TRIANGLE | 0.619 | 0.420 | 0.611 | 0.636 | 0.664 | 0.533 |
-| D: ConFu | 0.589 | 0.375 | 0.582 | 0.583 | 0.634 | 0.530 |
+| Model | Family-3 acc (`x123`) | Family-3 \(\kappa\) (`x123`) |
+| --- | ---: | ---: |
+| A: 3x unimodal SimCLR | 0.580 | 0.363 |
+| B: pairwise InfoNCE | 0.567 | 0.344 |
+| C: TRIANGLE | 0.619 | 0.420 |
+| D: ConFu | 0.589 | 0.375 |
 
 This `x123` table is only a compact snapshot. The full subset matrix (`x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`) is the key diagnostic because it shows which methods improve specifically when additional modalities are exposed.
 
-### 6.1.4 Chance-Centered Alternatives To F1 (Recommendation)
+### 6.1.4 Chance-Centered Metric Choice
 
-If we want a metric whose random baseline is exactly \(0\) without applying a post-hoc skill transform, the most practical replacement for F1 in this section is **Cohen's kappa**, defined as \(\kappa = (p_o - p_e)/(1 - p_e)\), where \(p_o\) is observed agreement and \(p_e\) is chance agreement under the empirical marginals. By construction, chance-level performance gives \(\kappa \approx 0\).
-
-Two additional options are also reasonable:
-
-- **Matthews correlation coefficient (MCC)** for binary tasks (and its multiclass extension), which is also centered near \(0\) at chance.
-- **Chance-corrected F1 (F1-skill)**, e.g. \(F_{1,\mathrm{skill}} = \frac{F_1 - F_{1,\mathrm{rand}}}{1 - F_{1,\mathrm{rand}}}\); for balanced binary tasks with \(F_{1,\mathrm{rand}} \approx 0.5\), this reduces to \(F_{1,\mathrm{skill}} \approx 2F_1 - 1\).
-
-For the source->target benchmark in Section `6.8.1`, a good reporting practice is to keep macro-F1 for comparability with prior plots and add \(\kappa\) as the chance-centered primary scalar.
+The primary metric in this results section is **Cohen's kappa**, \(\kappa = (p_o - p_e)/(1 - p_e)\), because it is commonly accepted, chance-corrected, and directly interpretable: \(\kappa \approx 0\) indicates chance-level prediction and \(\kappa = 1\) indicates perfect agreement.
 
 ### 6.2 Legacy Fused Classification Check (Context Only)
 
@@ -195,7 +186,7 @@ Main findings from Table 7a:
 
 Task construction is dimension-wise binary prediction on the target modality. For each target dimension, we threshold the raw target value at the train-split median (which yields approximately balanced classes), fit a linear classifier from frozen source features, and average performance across target dimensions.
 
-Let \(F_{1,d}\) denote the binary F1 score for target dimension \(d\). The reported macro-F1 is \(\frac{1}{D}\sum_{d=1}^{D}F_{1,d}\). We also report Cohen's \(\kappa\), \(\kappa = (p_o-p_e)/(1-p_e)\), as a chance-centered metric (\(\kappa \approx 0\) at random performance), and the normalized score \(F_{1,\mathrm{skill}} = (F_1-0.5)/0.5 = 2F_1-1\) for the median-balanced binary tasks.
+For each target dimension, we compute Cohen's \(\kappa_d\) from the binary predictions induced by the train-median threshold. The reported source->target score is the macro average \(\bar{\kappa} = \frac{1}{D}\sum_{d=1}^{D}\kappa_d\), where \(D\) is the target dimensionality.
 
 Evaluation is reported at three levels: (i) the full source->target matrix, (ii) the rotated pair->target slice, and (iii) PID-stratified heatmaps for the rotated slice.
 
@@ -208,22 +199,22 @@ Primary pair->target artifacts:
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_heatmaps.png`
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1_heatmaps.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_summary.csv` (5-fold macro-F1 and macro-\(\kappa\))
+- `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_summary.csv` (5-fold macro-\(\kappa\); also includes auxiliary scores)
 - `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_grouped_summary.csv` (5-fold grouped summary)
 
-Figures 12-14 are legacy macro-F1 visualizations retained for qualitative structure. Tables 7a/7/7b below are the regenerated **5-fold macro-\(\kappa\)** results (with macro-F1 retained in the CSV exports for comparison).
+Figures 12-14 are legacy visualizations retained for qualitative structure. Tables 7a/7/7b below are the regenerated **5-fold macro-\(\kappa\)** results.
 
 ![Rotated pair->target downstream summary](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.png)
 
-*Figure 12. Main downstream benchmark: rotated pair->target modality classification with frozen encoders. Left: rotation-averaged `F1-skill`. Middle: heuristic “applicable PID” average. Right: applicability gap (`applicable - non-applicable`).*
+*Figure 12. Legacy rotated pair->target summary visualization retained for qualitative comparison (original plot labels use a normalized score).*
 
 ![PID-by-rotation pair->target heatmaps](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_heatmaps.png)
 
-*Figure 13. Full `PID x rotation` pair->target downstream scores (`F1-skill`; random ≈ 0) for each method.*
+*Figure 13. Legacy `PID x rotation` pair->target visualization retained for qualitative comparison (original plot labels use a normalized score).*
 
 ![All source->target macro-F1 heatmaps](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1_heatmaps.png)
 
-*Figure 14. Main downstream result: all source->target rotations (`1/2/3/12/13/23/123 -> 1/2/3`) reported as macro-F1 for A-D (frozen encoders). Includes self-prediction rows such as `1->1` and cross-modal rows such as `2->1`.*
+*Figure 14. Legacy all source->target visualization retained for qualitative structure. The quantitative main result is reported in Tables 7a/7/7b using macro-\(\kappa\).*
 
 #### Table 7. Focused Excerpt From The Main Matrix: Rotated Pair->Target Results (macro-\(\kappa\), 5-fold mean \(\pm\) SE)
 
@@ -248,7 +239,7 @@ Interpretation of the rotated pair->target slice:
 
 - Under the regenerated 5-fold \(\kappa\) evaluation, all three rotated pair->target tasks are **close to chance** for all methods (\(\kappa\) values near zero).
 - The ordering is therefore much less stable and much less important than the stronger conclusion: **the regime needs improvement before chance-corrected cross-modal claims are convincing**.
-- The macro-F1-based legacy plots remain useful for qualitative comparison, but they overstate practical separability relative to \(\kappa\).
+- The legacy score plots remain useful for qualitative comparison, but they overstate practical separability relative to \(\kappa\).
 
 #### Table 7b. Main Result Matrix: All Source->Target Rotations (macro-\(\kappa\), A-D only, 5-fold means)
 
@@ -299,7 +290,7 @@ Important note on the heuristic “applicable PID” averages:
 
 ### 6.9 What To Do Next (Downstream-First)
 
-1. Add a **synergy-focused tuning track** (select on validation synergy `F1-skill` instead of all-`y`) and compare with the all-`y` selected models.
+1. Add a **synergy-focused tuning track** (select on validation synergy \(\kappa\) instead of all-`y`) and compare with the all-`y` selected models.
 2. Evaluate both `h` and `z` (encoder vs projector outputs) for the downstream `y_*` classification probes; some objectives may hide more linear information in `h`.
 3. Add regime-stratified downstream results (`rho`, `sigma`, `hop`) to identify where higher-order methods help or hurt.
 4. Add formal `R-only` and `S-only` benchmark stages with the same frozen-encoder downstream protocol.

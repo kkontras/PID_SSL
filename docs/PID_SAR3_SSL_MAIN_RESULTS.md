@@ -18,7 +18,7 @@ Implementation:
 
 ### 6.1.1 Main-Results Reporting Contract
 
-To avoid presenting the benchmark as a single-seed leaderboard, the main results are defined as a small set of decision metrics reported with uncertainty across repeated runs. In practice, we report the sample mean \(\bar{x}\) and a normal-approximation interval \(\bar{x} \pm 1.96\,s/\sqrt{n}\), where \(s\) is the sample standard deviation over repeated runs and \(n\) is the number of runs.
+To avoid presenting the benchmark as a single-seed leaderboard, the main results are defined as a small set of decision metrics reported with uncertainty across repeated runs. In practice, we report the sample mean \(\bar{x}\) together with the standard error \(\mathrm{SE}=s/\sqrt{n}\), where \(s\) is the sample standard deviation over runs and \(n\) is the number of runs.
 
 The main text prioritizes one ranking target (the source->target matrix in Section `6.8.1`) together with a small number of failure-mode diagnostics, while broader sweeps and auxiliary tables are moved to the appendix.
 
@@ -32,20 +32,20 @@ Implementation artifact (repeated-seed summary):
 
 We ran the repeated-seed summary harness (`test_main_results_four_models_repeated_seed_summary`) on February 23, 2026 in a short CPU regime (`n=3` dataset worlds / optimization seeds; `140` SSL steps). This run is not the final benchmark, but it is sufficient to replace single-seed statements with uncertainty-aware summaries.
 
-Secondary diagnostics (mean [95% CI]):
+Secondary diagnostics (mean \(\pm\) SE):
 
 | Model | Family-3 acc | mean `R` recall | mean `R -> S` leakage | mean matched `R/S` centroid cos |
 | --- | ---: | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.566 [0.552, 0.579] | 0.546 [0.520, 0.573] | 0.201 [0.183, 0.220] | 0.769 [0.724, 0.813] |
-| B: pairwise InfoNCE | 0.560 [0.558, 0.562] | 0.520 [0.509, 0.532] | 0.200 [0.179, 0.221] | 0.921 [0.902, 0.939] |
-| C: TRIANGLE | 0.606 [0.581, 0.631] | 0.642 [0.627, 0.657] | 0.186 [0.154, 0.217] | 0.936 [0.912, 0.960] |
-| D: ConFu | 0.557 [0.551, 0.562] | 0.508 [0.476, 0.539] | 0.202 [0.188, 0.217] | 0.928 [0.909, 0.948] |
+| A: 3x unimodal SimCLR | 0.566 ± 0.0068 | 0.546 ± 0.0135 | 0.201 ± 0.0094 | 0.769 ± 0.0227 |
+| B: pairwise InfoNCE | 0.560 ± 0.0010 | 0.520 ± 0.0059 | 0.200 ± 0.0108 | 0.921 ± 0.0095 |
+| C: TRIANGLE | 0.606 ± 0.0129 | 0.642 ± 0.0076 | 0.186 ± 0.0162 | 0.936 ± 0.0122 |
+| D: ConFu | 0.557 ± 0.0028 | 0.508 ± 0.0161 | 0.202 ± 0.0072 | 0.928 ± 0.0101 |
 
 Interpretation of the secondary diagnostics snapshot:
 
 - **TRIANGLE remains strongest in this short regime** on family classification and `R` recall, and it also has the lowest mean `R -> S` leakage among the four in this run.
 - **Unimodal SimCLR still has much lower matched `R/S` centroid overlap** than the cross-modal methods (better geometry on this pathology metric), so the story is not a single scalar ranking.
-- **Pairwise InfoNCE and ConFu are close on several summary metrics** in this short regime, which is exactly the kind of claim that should be reported with intervals rather than one-run tables.
+- **Pairwise InfoNCE and ConFu are close on several summary metrics** in this short regime, which is exactly the kind of claim that should be reported with standard errors rather than one-run tables.
 
 Short-run caveat:
 
@@ -166,22 +166,6 @@ The main downstream benchmark uses modalities directly. Given frozen encoder fea
 
 This design avoids making a hand-crafted latent proxy the primary target. Instead, it asks whether the learned representation supports actual cross-modal prediction.
 
-Task construction is dimension-wise binary prediction on the target modality. For each target dimension, we threshold the raw target value at the train-split median (which yields approximately balanced classes), fit a linear classifier from frozen source features, and average performance across target dimensions.
-
-Let \(F_{1,d}\) denote the binary F1 score for target dimension \(d\). The reported macro-F1 is \(\frac{1}{D}\sum_{d=1}^{D}F_{1,d}\). We also report Cohen's \(\kappa\), \(\kappa = (p_o-p_e)/(1-p_e)\), as a chance-centered metric (\(\kappa \approx 0\) at random performance), and the normalized score \(F_{1,\mathrm{skill}} = (F_1-0.5)/0.5 = 2F_1-1\) for the median-balanced binary tasks.
-
-Evaluation is reported at three levels: (i) the full source->target matrix, (ii) the rotated pair->target slice, and (iii) PID-stratified heatmaps for the rotated slice.
-
-Primary pair->target artifacts:
-
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_overall_rotation_scores.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_scores.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_heatmaps.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1_heatmaps.png`
-
 Presentation order in this section:
 
 - **Figure 14 + Table 7b (the full all-source->target matrix)** are the main benchmark result.
@@ -207,6 +191,22 @@ Main findings from Table 7a:
 - Self-prediction and overcomplete settings (`pair->member`, `123->target`) are near-ceiling for all methods, so they are sanity checks, not ranking metrics.
 - The ranking signal lives in the **cross-modal** groups, especially **pair->heldout target**.
 - `C: TRIANGLE` is strongest on the grouped pair->heldout target average; `B: pairwise InfoNCE` is close; `D: ConFu` remains competitive; `A` is near the cross-modal floor.
+
+Task construction is dimension-wise binary prediction on the target modality. For each target dimension, we threshold the raw target value at the train-split median (which yields approximately balanced classes), fit a linear classifier from frozen source features, and average performance across target dimensions.
+
+Let \(F_{1,d}\) denote the binary F1 score for target dimension \(d\). The reported macro-F1 is \(\frac{1}{D}\sum_{d=1}^{D}F_{1,d}\). We also report Cohen's \(\kappa\), \(\kappa = (p_o-p_e)/(1-p_e)\), as a chance-centered metric (\(\kappa \approx 0\) at random performance), and the normalized score \(F_{1,\mathrm{skill}} = (F_1-0.5)/0.5 = 2F_1-1\) for the median-balanced binary tasks.
+
+Evaluation is reported at three levels: (i) the full source->target matrix, (ii) the rotated pair->target slice, and (iii) PID-stratified heatmaps for the rotated slice.
+
+Primary pair->target artifacts:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_overall_rotation_scores.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_scores.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.png`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_heatmaps.png`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1_heatmaps.png`
 
 ![Rotated pair->target downstream summary](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.png)
 

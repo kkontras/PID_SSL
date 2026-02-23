@@ -29,6 +29,9 @@ class SSLTrainConfig:
     log_every: int = 10
     device: str = "cpu"
     seed: int = 0
+    triangle_reg_weight: float = 0.15
+    confu_pair_weight: float = 0.5
+    confu_fused_weight: float = 0.5
 
 
 @dataclass
@@ -171,10 +174,37 @@ def _multi_positive_infonce(anchor: torch.Tensor, positives_1: torch.Tensor, pos
     return (-torch.log((pos_mass + 1e-12) / denom)).mean()
 
 
+def _triangle_shape_score(z1: torch.Tensor, z2: torch.Tensor, z3: torch.Tensor) -> torch.Tensor:
+    """
+    Dimensionless triangle shape score in [0, 1] (approx; numerical clipping used),
+    higher means less collinear and more equilateral.
+    """
+    p1 = F.normalize(z1, dim=-1)
+    p2 = F.normalize(z2, dim=-1)
+    p3 = F.normalize(z3, dim=-1)
+    a = torch.linalg.norm(p2 - p3, dim=-1)
+    b = torch.linalg.norm(p1 - p3, dim=-1)
+    c = torch.linalg.norm(p1 - p2, dim=-1)
+    s = 0.5 * (a + b + c)
+    area_sq = torch.clamp(s * (s - a) * (s - b) * (s - c), min=0.0)
+    area = torch.sqrt(area_sq + 1e-12)
+    # Normalized shape factor (1 for equilateral triangle).
+    denom = (a * a + b * b + c * c) + 1e-12
+    score = (4.0 * np.sqrt(3.0) * area) / denom
+    return torch.clamp(score, 0.0, 1.0)
+
+
+def _fused_pair(z_a: torch.Tensor, z_b: torch.Tensor) -> torch.Tensor:
+    return F.normalize(0.5 * (z_a + z_b), dim=-1)
+
+
 def ssl_objective_loss(
     z: Dict[str, torch.Tensor],
     objective: str,
     temperature: float = 0.2,
+    triangle_reg_weight: float = 0.15,
+    confu_pair_weight: float = 0.5,
+    confu_fused_weight: float = 0.5,
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
     if objective == "pairwise_simclr":
         l12 = _nt_xent_pair(z["x1"], z["x2"], temperature)
@@ -189,6 +219,45 @@ def ssl_objective_loss(
         l3 = _multi_positive_infonce(z["x3"], z["x1"], z["x2"], temperature)
         loss = (l1 + l2 + l3) / 3.0
         metrics = {"loss_anchor_x1": float(l1.detach().cpu()), "loss_anchor_x2": float(l2.detach().cpu()), "loss_anchor_x3": float(l3.detach().cpu())}
+        return loss, metrics
+    if objective == "triangle_like":
+        l12 = _nt_xent_pair(z["x1"], z["x2"], temperature)
+        l13 = _nt_xent_pair(z["x1"], z["x3"], temperature)
+        l23 = _nt_xent_pair(z["x2"], z["x3"], temperature)
+        pair_loss = (l12 + l13 + l23) / 3.0
+        shape = _triangle_shape_score(z["x1"], z["x2"], z["x3"]).mean()
+        # Encourage non-collinear tri-modal geometry while retaining contrastive pair matching.
+        loss = pair_loss - triangle_reg_weight * shape
+        metrics = {
+            "pair_loss": float(pair_loss.detach().cpu()),
+            "triangle_shape": float(shape.detach().cpu()),
+            "loss_12": float(l12.detach().cpu()),
+            "loss_13": float(l13.detach().cpu()),
+            "loss_23": float(l23.detach().cpu()),
+        }
+        return loss, metrics
+    if objective == "confu_style":
+        l12 = _nt_xent_pair(z["x1"], z["x2"], temperature)
+        l13 = _nt_xent_pair(z["x1"], z["x3"], temperature)
+        l23 = _nt_xent_pair(z["x2"], z["x3"], temperature)
+        pair_loss = (l12 + l13 + l23) / 3.0
+
+        f23 = _fused_pair(z["x2"], z["x3"])
+        f13 = _fused_pair(z["x1"], z["x3"])
+        f12 = _fused_pair(z["x1"], z["x2"])
+        lf1 = _nt_xent_pair(f23, z["x1"], temperature)
+        lf2 = _nt_xent_pair(f13, z["x2"], temperature)
+        lf3 = _nt_xent_pair(f12, z["x3"], temperature)
+        fused_loss = (lf1 + lf2 + lf3) / 3.0
+
+        loss = confu_pair_weight * pair_loss + confu_fused_weight * fused_loss
+        metrics = {
+            "pair_loss": float(pair_loss.detach().cpu()),
+            "fused_loss": float(fused_loss.detach().cpu()),
+            "fuse_to_x1": float(lf1.detach().cpu()),
+            "fuse_to_x2": float(lf2.detach().cpu()),
+            "fuse_to_x3": float(lf3.detach().cpu()),
+        }
         return loss, metrics
     raise ValueError(f"Unknown objective: {objective}")
 
@@ -223,7 +292,14 @@ def train_ssl(
             batch_np = generator.generate(n=cfg.batch_size, pid_ids=pids)
         batch_t = numpy_batch_to_torch(batch_np, device=str(device))
         _, z = model(batch_t)
-        loss, parts = ssl_objective_loss(z, objective=cfg.objective, temperature=cfg.temperature)
+        loss, parts = ssl_objective_loss(
+            z,
+            objective=cfg.objective,
+            temperature=cfg.temperature,
+            triangle_reg_weight=cfg.triangle_reg_weight,
+            confu_pair_weight=cfg.confu_pair_weight,
+            confu_fused_weight=cfg.confu_fused_weight,
+        )
 
         opt.zero_grad(set_to_none=True)
         loss.backward()

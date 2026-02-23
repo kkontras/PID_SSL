@@ -210,6 +210,20 @@ def _train_model_b_pairwise_infonce(gen: PIDSar3DatasetGenerator, enc_cfg: SSLEn
     return model, rows
 
 
+def _train_trimodal_objective(
+    gen: PIDSar3DatasetGenerator,
+    enc_cfg: SSLEncoderConfig,
+    train_cfg: SSLTrainConfig,
+    objective: str,
+    model_name: str,
+) -> Tuple[TriModalSSLModel, List[Dict[str, float]]]:
+    model = TriModalSSLModel(enc_cfg)
+    cfg = SSLTrainConfig(**{**train_cfg.__dict__, "objective": objective})
+    hist = train_ssl(model, gen, cfg)
+    rows = [{"model": model_name, "stream": "joint", **r} for r in hist]
+    return model, rows
+
+
 def _evaluate_all_tasks(Xtr: np.ndarray, train_batch: Dict[str, np.ndarray], Xte: np.ndarray, test_batch: Dict[str, np.ndarray]) -> Dict[str, float]:
     ytr_pid = train_batch["pid_id"].astype(np.int64)
     yte_pid = test_batch["pid_id"].astype(np.int64)
@@ -497,3 +511,226 @@ def test_plot_fused_confusions_two_models():
 
     assert np.isfinite(eval_a["pid10_acc"]) and np.isfinite(eval_b["pid10_acc"])
     assert np.isfinite(eval_a["family3_acc"]) and np.isfinite(eval_b["family3_acc"])
+
+
+def test_plot_fused_confusions_four_models_higher_order():
+    """
+    Four-way fused frozen-encoder comparison:
+    - Model A: sum of 3 unimodal SimCLR streams
+    - Model B: sum of 3 pairwise InfoNCE losses (pairwise NT-Xent; SimCLR-style)
+    - Model C: TRIANGLE-like (pairwise NT-Xent + triad shape regularizer)
+    - Model D: ConFu-style (pairwise NT-Xent + fused-pair-to-third contrastive terms)
+    """
+    out_dir = _ensure_plot_dir()
+
+    data_cfg = PIDDatasetConfig(
+        d=32,
+        m=8,
+        sigma=0.45,
+        rho_choices=(0.2, 0.5, 0.8),
+        hop_choices=(1, 2, 3, 4),
+        seed=1401,
+        deleakage_fit_samples=1024,
+    )
+    ssl_gen = PIDSar3DatasetGenerator(data_cfg)
+    probe_train_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": 1402}))
+    probe_test_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": 1403}))
+    probe_train = _balanced_batch(probe_train_gen, n_per_pid=340, shuffle_seed=41, return_aux=True)
+    probe_test = _balanced_batch(probe_test_gen, n_per_pid=160, shuffle_seed=42, return_aux=True)
+
+    enc_cfg = SSLEncoderConfig(input_dim=data_cfg.d, encoder_hidden_dim=96, representation_dim=48, projector_hidden_dim=96, projector_dim=48)
+    base_train_cfg = SSLTrainConfig(
+        lr=1e-3,
+        weight_decay=1e-5,
+        batch_size=192,
+        steps=140,
+        temperature=0.2,
+        device="cpu",
+        seed=51,
+        triangle_reg_weight=0.15,
+        confu_pair_weight=0.5,
+        confu_fused_weight=0.5,
+    )
+
+    # Train all four models.
+    unimodal_models, hist_a = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, base_train_cfg)
+    Xtr_a = _concat_unimodal_frozen(unimodal_models, probe_train)
+    Xte_a = _concat_unimodal_frozen(unimodal_models, probe_test)
+
+    model_b, hist_b = _train_trimodal_objective(ssl_gen, enc_cfg, base_train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce")
+    Xtr_b = _concat_trimodal_frozen(model_b, probe_train)
+    Xte_b = _concat_trimodal_frozen(model_b, probe_test)
+
+    model_c, hist_c = _train_trimodal_objective(ssl_gen, enc_cfg, base_train_cfg, "triangle_like", "triangle_like")
+    Xtr_c = _concat_trimodal_frozen(model_c, probe_train)
+    Xte_c = _concat_trimodal_frozen(model_c, probe_test)
+
+    model_d, hist_d = _train_trimodal_objective(ssl_gen, enc_cfg, base_train_cfg, "confu_style", "confu_style")
+    Xtr_d = _concat_trimodal_frozen(model_d, probe_train)
+    Xte_d = _concat_trimodal_frozen(model_d, probe_test)
+
+    ytr_pid = probe_train["pid_id"].astype(np.int64)
+    yte_pid = probe_test["pid_id"].astype(np.int64)
+
+    evals = {
+        "model_a_unimodal_simclr_sum": _evaluate_all_tasks(Xtr_a, probe_train, Xte_a, probe_test),
+        "model_b_pairwise_infonce_sum": _evaluate_all_tasks(Xtr_b, probe_train, Xte_b, probe_test),
+        "model_c_triangle_like": _evaluate_all_tasks(Xtr_c, probe_train, Xte_c, probe_test),
+        "model_d_confu_style": _evaluate_all_tasks(Xtr_d, probe_train, Xte_d, probe_test),
+    }
+    geoms = {
+        "model_a_unimodal_simclr_sum": _compute_geometry_diagnostics(Xtr_a, ytr_pid, Xte_a, yte_pid),
+        "model_b_pairwise_infonce_sum": _compute_geometry_diagnostics(Xtr_b, ytr_pid, Xte_b, yte_pid),
+        "model_c_triangle_like": _compute_geometry_diagnostics(Xtr_c, ytr_pid, Xte_c, yte_pid),
+        "model_d_confu_style": _compute_geometry_diagnostics(Xtr_d, ytr_pid, Xte_d, yte_pid),
+    }
+
+    model_titles = {
+        "model_a_unimodal_simclr_sum": "A: 3x unimodal SimCLR",
+        "model_b_pairwise_infonce_sum": "B: pairwise InfoNCE sum\n(pairwise SimCLR/NT-Xent)",
+        "model_c_triangle_like": "C: TRIANGLE-like",
+        "model_d_confu_style": "D: ConFu-style",
+    }
+
+    # Primary figure: 2x2 PID-10 confusion matrices.
+    fig, axes = plt.subplots(2, 2, figsize=(18.5, 14.0))
+    keys = list(model_titles.keys())
+    for ax, key in zip(axes.flat, keys):
+        cm = evals[key]["_pid_cm"]  # type: ignore[index]
+        cmn = cm.astype(np.float32) / np.maximum(cm.sum(axis=1, keepdims=True), 1.0)
+        im = ax.imshow(cmn, vmin=0.0, vmax=1.0, cmap="viridis", aspect="auto")
+        ax.set_title(model_titles[key])
+        ax.set_xlabel("Predicted PID term")
+        ax.set_ylabel("True PID term")
+        ax.set_xticks(range(10))
+        ax.set_xticklabels(PID_NAMES, rotation=35, ha="right", fontsize=8)
+        ax.set_yticks(range(10))
+        ax.set_yticklabels(PID_NAMES, fontsize=8)
+        # annotate diagonal
+        for i in range(10):
+            ax.text(i, i, f"{cmn[i, i]:.2f}", ha="center", va="center", color="white", fontsize=7)
+    fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.022, pad=0.02)
+    fig.suptitle("PID-10 confusion matrices: fused frozen encoders + linear probe (4-model comparison)", y=0.99)
+    _savefig(out_dir / "pid10_confusions_fused_frozen_four_models.png")
+
+    # Geometry comparison (compact bar-panel)
+    geo_keys = ["model_a_unimodal_simclr_sum", "model_b_pairwise_infonce_sum", "model_c_triangle_like", "model_d_confu_style"]
+    geo_labels = ["A: 3x uni SimCLR", "B: pairwise InfoNCE", "C: TRIANGLE-like", "D: ConFu-style"]
+    colors = ["#4c78a8", "#f58518", "#54a24b", "#e45756"]
+    x = np.arange(4)
+    fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.4))
+
+    # Mean matched R/S centroid cosine (lower is better)
+    rs_cos_means = [float(np.mean(geoms[k]["rs_pair_centroid_cos"])) for k in geo_keys]
+    axes[0].bar(x, rs_cos_means, color=colors)
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(geo_labels, rotation=20, ha="right")
+    axes[0].set_ylabel("mean matched R/S centroid cosine")
+    axes[0].set_title("Matched R/S centroid overlap\n(lower is better)")
+    axes[0].grid(axis="y", alpha=0.25)
+
+    # Mean matched-pair nearest-centroid accuracy (higher is better)
+    rs_acc_means = [float(np.mean(geoms[k]["rs_pair_accs"])) for k in geo_keys]
+    axes[1].bar(x, rs_acc_means, color=colors)
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(geo_labels, rotation=20, ha="right")
+    axes[1].set_ylim(0.45, 1.0)
+    axes[1].set_ylabel("mean matched-pair NC accuracy")
+    axes[1].set_title("Matched R/S separability\n(higher is better)")
+    axes[1].grid(axis="y", alpha=0.25)
+
+    # PID-10 accuracy (classification summary paired with confusion primary)
+    pid_accs = [float(evals[k]["pid10_acc"]) for k in geo_keys]
+    axes[2].bar(x, pid_accs, color=colors)
+    axes[2].set_xticks(x)
+    axes[2].set_xticklabels(geo_labels, rotation=20, ha="right")
+    axes[2].set_ylim(0.0, 1.0)
+    axes[2].set_ylabel("PID-10 accuracy")
+    axes[2].set_title("Classification summary\n(complements confusions)")
+    axes[2].grid(axis="y", alpha=0.25)
+    fig.suptitle("Geometry + PID summary (4-model fused frozen comparison)", y=0.99)
+    fig.subplots_adjust(bottom=0.28, wspace=0.35)
+    _savefig(out_dir / "geometry_pid_summary_four_models.png")
+
+    # Secondary all-task summary (compact heatmap for 4 models x tasks)
+    task_order = ["pid10_acc", "family3_acc", "y_u1_r2", "y_r12_r2", "y_r123_r2", "y_s12_3_r2"]
+    task_labels = ["PID-10 acc", "Family-3 acc", "R2(y_u1)", "R2(y_r12)", "R2(y_r123)", "R2(y_s12_3)"]
+    mat = np.array([[float(evals[k][t]) for t in task_order] for k in geo_keys], dtype=np.float32)
+    fig, ax = plt.subplots(figsize=(11.8, 4.8))
+    im = ax.imshow(mat, aspect="auto", cmap="coolwarm")
+    ax.set_xticks(range(len(task_labels)))
+    ax.set_xticklabels(task_labels, rotation=20, ha="right")
+    ax.set_yticks(range(len(geo_labels)))
+    ax.set_yticklabels(geo_labels)
+    ax.set_title("Secondary all-task summary (fused frozen encoders + linear probes)")
+    for i in range(mat.shape[0]):
+        for j in range(mat.shape[1]):
+            ax.text(j, i, f"{mat[i,j]:.2f}", ha="center", va="center", color="white", fontsize=8)
+    fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
+    fig.subplots_adjust(bottom=0.28)
+    _savefig(out_dir / "all_tasks_heatmap_four_models.png")
+
+    # CSV summaries
+    with (out_dir / "fused_frozen_four_models_task_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["model", *task_order])
+        for k in geo_keys:
+            writer.writerow([k] + [float(evals[k][t]) for t in task_order])
+
+    with (out_dir / "fused_frozen_four_models_geometry_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            [
+                "model",
+                "overall_margin",
+                "family_margin_U",
+                "family_margin_R",
+                "family_margin_S",
+                "mean_matched_rs_centroid_cos",
+                "mean_matched_rs_nc_acc",
+                "rs_cos_R12_S12",
+                "rs_cos_R13_S13",
+                "rs_cos_R23_S23",
+                "rs_ncacc_R12_S12",
+                "rs_ncacc_R13_S13",
+                "rs_ncacc_R23_S23",
+            ]
+        )
+        for k in geo_keys:
+            g = geoms[k]
+            writer.writerow(
+                [
+                    k,
+                    float(g["overall_margin"][0]),
+                    float(g["family_margin_means"][0]),
+                    float(g["family_margin_means"][1]),
+                    float(g["family_margin_means"][2]),
+                    float(np.mean(g["rs_pair_centroid_cos"])),
+                    float(np.mean(g["rs_pair_accs"])),
+                    float(g["rs_pair_centroid_cos"][0]),
+                    float(g["rs_pair_centroid_cos"][1]),
+                    float(g["rs_pair_centroid_cos"][2]),
+                    float(g["rs_pair_accs"][0]),
+                    float(g["rs_pair_accs"][1]),
+                    float(g["rs_pair_accs"][2]),
+                ]
+            )
+
+    with (out_dir / "fused_frozen_four_models_confusions.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["model", "true_label", "pred_label", "count"])
+        for k in geo_keys:
+            cm = evals[k]["_pid_cm"]  # type: ignore[index]
+            for i, li in enumerate(PID_NAMES):
+                for j, lj in enumerate(PID_NAMES):
+                    writer.writerow([k, li, lj, int(cm[i, j])])
+
+    with (out_dir / "fused_frozen_four_models_training_curves.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["model", "stream", "step", "loss"])
+        writer.writeheader()
+        for r in hist_a + hist_b + hist_c + hist_d:
+            writer.writerow({k: r.get(k, "") for k in ["model", "stream", "step", "loss"]})
+
+    # Sanity checks
+    for k in geo_keys:
+        assert np.isfinite(float(evals[k]["pid10_acc"]))

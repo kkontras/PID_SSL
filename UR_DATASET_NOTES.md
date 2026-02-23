@@ -545,55 +545,95 @@ The persistent `Rij <-> Sij->k` confusion suggests the current contrastive objec
 
 The next objective variants should be judged by whether they reduce those specific off-diagonal bands in Figure 8 **and** lower the matched `Rij`/`Sij->k` centroid cosine in Figure 10.
 
-### 6.8 Related Higher-Order Multimodal Alignment Ideas (TRIANGLE, ConFu)
+### 6.8 Higher-Order Alignment Extensions: TRIANGLE-like and ConFu-style (Implemented Comparison)
 
-Two recent multimodal alignment papers are directly relevant to the failure mode observed here (`Rij <-> Sij->k` overlap/confusion):
+We implemented two **inspired** (not exact paper-faithful) higher-order objectives to test the hypothesis from Sections 6.4-6.7:
 
-1. **TRIANGLE** (Cicchetti, Grassucci, Comminiello): *A TRIANGLE Enables Multimodal Alignment Beyond Cosine Similarity*
-2. **ConFu** (Koutoupis et al.): *The More, the Merrier: Contrastive Fusion for Higher-Order Multimodal Alignment*
+- can higher-order tri-modal alignment reduce the `Rij <-> Sij->k` overlap/confusion seen under pairwise-only contrastive training?
 
-Why they matter for this benchmark:
+Compared methods (same fused frozen validation protocol):
 
-- Our current pairwise InfoNCE baseline (Model B) improves some latent linear recoverability, but it also increases matched `Rij`/`Sij->k` centroid overlap in the fused representation space.
-- This suggests pairwise similarity alone is not enough to separate:
-  - pairwise shared structure (redundancy)
-  - higher-order / directional structure (synergy)
+1. **A: 3x unimodal SimCLR** (augmentation-based, one stream per modality)
+2. **B: pairwise InfoNCE sum** (`(x1,x2) + (x1,x3) + (x2,x3)`)  
+   Note: in this codebase, pairwise SimCLR and pairwise InfoNCE are the same NT-Xent form.
+3. **C: TRIANGLE-like** (pairwise InfoNCE + triad shape regularizer to discourage collinear tri-modal geometry)
+4. **D: ConFu-style** (pairwise InfoNCE + fused-pair-to-third contrastive terms)
 
-How these papers map onto our diagnostics:
+Relevant papers motivating the direction:
 
-- **TRIANGLE-style idea (joint geometric alignment beyond pairwise cosine)**
-  - relevant to Figure 10 because our current diagnostics already expose a geometric overlap problem
-  - a triangle-area / joint-geometry similarity may help preserve tri-modal structure without over-collapsing matched `Rij` and `Sij->k` classes
-  - concrete test in this benchmark: compare matched `Rij`/`Sij->k` centroid cosine and nearest-centroid pair accuracy before/after replacing pairwise cosine with a TRIANGLE-like similarity
+- **TRIANGLE** (Cicchetti, Grassucci, Comminiello), *A TRIANGLE Enables Multimodal Alignment Beyond Cosine Similarity*
+- **ConFu** (Koutoupis et al.), *The More, the Merrier: Contrastive Fusion for Higher-Order Multimodal Alignment*
 
-- **ConFu-style idea (fused higher-order contrastive term)**
-  - directly relevant to the `Rij <-> Sij->k` confusions because ConFu explicitly introduces fused-modality contrastive alignment (beyond pairwise-only terms)
-  - this is a natural candidate for reducing the ambiguity between pairwise redundancy and directional synergy by modeling higher-order interactions while preserving pairwise correspondence
-  - concrete test in this benchmark: add fused terms such as `f(h_i,h_j)` aligned with `h_k` and evaluate whether Figure 8 off-diagonal `Rij <-> Sij->k` bands shrink
+#### Primary Figure: 4-Model PID-10 Confusions (Fused Frozen Validation)
 
-What would count as improvement in our analysis (not just aggregate accuracy):
+![PID-10 confusion matrices, 4-model comparison](test_outputs/pid_sar3_ssl_fused_confusions/pid10_confusions_fused_frozen_four_models.png)
 
-- lower matched `Rij`/`Sij->k` centroid cosine in Figure 10 / Table 3
-- better matched-pair nearest-centroid separability (`R12` vs `S12->3`, etc.)
-- reduced `Rij <-> Sij->k` off-diagonal mass in the PID-10 confusion matrix (Figure 8)
-- ideally, improved latent-target linear recoverability without sacrificing PID-term separability
+*Figure 11. `PID-10` row-normalized confusion matrices for four SSL objectives under the same fused frozen-encoder linear-probe protocol (`[h1,h2,h3]`).* This is the primary comparison figure for TRIANGLE-like / ConFu-style vs the baselines.
 
-These two papers therefore fit naturally into the next iteration of this benchmark: they are not just "more baselines", but targeted responses to the specific geometry/pathology we have already measured.
+#### Geometry + PID Summary (Compact)
 
-Promising next directions:
+![Geometry and PID summary, 4 models](test_outputs/pid_sar3_ssl_fused_confusions/geometry_pid_summary_four_models.png)
+
+*Figure 12. Compact comparison of geometry/pathology metrics across the four models.* Left: matched `Rij`/`Sij->k` centroid overlap (lower is better). Middle: matched-pair separability (higher is better). Right: PID-10 accuracy.
+
+#### Table 5. Key Geometry + Classification Metrics (4 Models)
+
+Sources:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_four_models_geometry_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_four_models_task_summary.csv`
+
+| Model | PID-10 acc | Family-3 acc | Mean matched `R/S` centroid cosine | Mean matched `R/S` NC pair acc | `R²(y_r123)` | `R²(y_s12_3)` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| A: 3x unimodal SimCLR | 0.381 | 0.478 | 0.703 | 0.525 | -0.605 | -1.317 |
+| B: pairwise InfoNCE sum (pairwise SimCLR/NT-Xent) | 0.339 | 0.419 | 0.915 | 0.531 | -0.474 | -1.208 |
+| C: TRIANGLE-like | 0.362 | 0.431 | 0.940 | 0.531 | -0.200 | -0.738 |
+| D: ConFu-style | 0.344 | 0.424 | 0.933 | 0.540 | -0.307 | -0.746 |
+
+#### What Matters (and What Did Not Work Yet)
+
+What improved:
+
+- TRIANGLE-like and ConFu-style significantly improved some latent-target linear recoverability relative to the baselines in this run (especially `R²(y_r123)` and `R²(y_s12_3)`).
+- ConFu-style produced the best mean matched-pair nearest-centroid separability among the four (`0.540`), but only marginally.
+
+What did **not** improve (the main target pathology):
+
+- Neither TRIANGLE-like nor ConFu-style reduced matched `Rij`/`Sij->k` centroid overlap.
+- In fact, both increased mean matched `R/S` centroid cosine relative to the unimodal SimCLR baseline and remained very high (around `0.93-0.94`), even higher than pairwise InfoNCE in this run.
+- PID-10 confusion structure still shows the same matched-pair `Rij <-> Sij->k` failure mode.
+
+This is a useful negative result:
+
+- The current proxy implementations of TRIANGLE-like / ConFu-style improve some aspects of representation quality but do **not** solve the central redundancy-vs-synergy separation problem yet.
+- The benchmark is doing what it should do: rejecting "plausible" higher-order losses when they fail the geometry/confusion criteria.
+
+#### Self-Critique of These Implementations
+
+These are intentionally lightweight, benchmark-prototyping versions:
+
+- **TRIANGLE-like** here is a triad-shape regularized pairwise contrastive loss, not a faithful reimplementation of the TRIANGLE paper.
+- **ConFu-style** here uses a simple fused-pair contrastive term (average-fused pair projected against the third modality), not a full reproduction of the published method.
+
+So the conclusion is not "TRIANGLE/ConFu do not work", but:
+
+- **these first inspired proxies** do not reduce the `Rij <-> Sij->k` pathology under our current setup.
+
+Promising next directions (still guided by the same confusion + geometry criteria):
 
 1. Add a predictive head `([h_i,h_j] -> h_k)` to explicitly model directional structure.
 2. Use a hybrid loss: pairwise contrastive + target prediction, then re-check the `Rij <-> Sij->k` confusion bands.
-3. Implement a TRIANGLE-like joint tri-modal similarity and compare Figure 8 / Figure 10 directly.
-4. Implement a ConFu-style fused-modality contrastive term and test whether matched `Rij`/`Sij->k` overlap decreases.
-5. Probe `h` vs `z` separately (encoder output vs projector output), since SimCLR-style projectors can hide linearly decodable latent structure.
+3. Probe `h` vs `z` separately (encoder output vs projector output), since SimCLR-style projectors can hide linearly decodable latent structure.
+4. Replace the proxy TRIANGLE-like / ConFu-style objectives with closer paper-faithful implementations and re-run Figure 11 / Figure 12.
 
-### 6.9 Reproducing the Revised SSL Comparison
+### 6.9 Reproducing the Revised SSL Comparisons
 
 ```bash
 python - <<'PY'
 from tests.test_pid_sar3_ssl_fused_confusions import test_plot_fused_confusions_two_models
 test_plot_fused_confusions_two_models()
+from tests.test_pid_sar3_ssl_fused_confusions import test_plot_fused_confusions_four_models_higher_order
+test_plot_fused_confusions_four_models_higher_order()
 print("Saved outputs under test_outputs/pid_sar3_ssl_fused_confusions")
 PY
 ```

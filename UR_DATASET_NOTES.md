@@ -381,300 +381,148 @@ make_split("data/pid_sar3_ur_test.npz",  1000)
 PY
 ```
 
-## 6. First SSL Baselines (Tri-Modal Encoders + Contrastive Objectives)
+## 6. SSL Comparison (Revised): Fused Frozen-Encoder Confusions for Two Contrastive Setups
 
-This section adds an initial SSL training scaffold that treats `x1`, `x2`, and `x3` as three modalities and trains **three independent encoders + projectors** with contrastive objectives.
+This section replaces the earlier SSL write-up with a stricter and more relevant comparison.
 
-Implementation entry points:
+### 6.1 What Was Wrong With the Previous SSL Results (Self-Critique)
 
-- `pid_sar3_ssl.py` (tri-modal encoders/projectors, contrastive losses, training loop)
-- `tests/test_pid_sar3_ssl_baselines.py` (runs small SSL experiments, saves plots/CSVs)
+The earlier SSL additions were too broad and mixed multiple validation views (per-modality probes, scalar summaries, and several objectives) before locking down the most important question:
 
-### 6.1 What Was Implemented
+- **How do the learned frozen encoders behave when all three modalities are used together?**
+- **Which PID terms are confused with which, not just what the aggregate accuracy is?**
 
-Two first objectives are wired in:
+That made the story harder to interpret. In particular:
 
-- `pairwise_simclr`: SimCLR / NT-Xent applied to each modality pair and averaged over `(x1,x2)`, `(x1,x3)`, `(x2,x3)`.
-- `tri_positive_infonce`: one anchor modality with **two positives** (the other two modalities), averaged over anchors `x1`, `x2`, `x3`.
+- aggregate `PID-10` / `Family-3` scores hid important error structure
+- multiple objectives were compared before the validation target was nailed down
+- some plots were informative for debugging but not central for the report
 
-These use:
+This revision keeps only the most important result structure:
 
-- one encoder per modality (`x1`, `x2`, `x3`)
-- one projector per modality
-- frozen-representation linear probes for evaluation (`PID` 10-way and atom-family 3-way)
+- two models only
+- frozen encoders
+- all modalities concatenated at validation
+- confusion matrices as the primary output
 
-### 6.2 Quick Experiment Setup (Initial Smoke Test)
+### 6.2 Compared Models (Exactly Two)
 
-The first run is intentionally small (for iteration speed):
+We compare the two setups requested:
 
-- dataset: `d=32`, `m=8`, `sigma=0.45`
-- SSL model: MLP encoders/projectors with representation dim `48`
-- training: `120` steps, batch size `192`, CPU
-- evaluation: frozen linear probes on held-out synthetic data
+1. **Model A: sum of three unimodal SimCLR losses**
+   - one SimCLR stream per modality (`x1`, `x2`, `x3`)
+   - augmentation-based positives within each modality
+   - three encoders trained separately, then frozen
 
-### 6.3 Results
+2. **Model B: sum of three pairwise InfoNCE losses**
+   - cross-modal positives over `(x1,x2)`, `(x1,x3)`, `(x2,x3)`
+   - one tri-modal model with three encoders trained jointly
+   - frozen encoders for validation
 
-#### Training Curves
+Validation protocol (same for both):
 
-![Tri-modal SSL training loss curves](test_outputs/pid_sar3_ssl/ssl_training_loss_curves.png)
-
-*Figure 8. Contrastive training loss for the first two tri-modal SSL baselines.* Both objectives optimize stably in this short smoke-test regime. `tri_positive_infonce` reaches a lower loss than the pairwise SimCLR sum under the same budget.
-
-#### Frozen Probe Accuracy
-
-![SSL probe accuracy summary](test_outputs/pid_sar3_ssl/ssl_probe_accuracy_summary.png)
-
-*Figure 9. Frozen linear probe accuracy on held-out synthetic data.* `Raw concat` is a no-SSL reference on the observations themselves. Both SSL baselines improve probeability over this short training budget, with `tri_positive_infonce` best in this run.
-
-#### Cross-Modal Alignment Tendency by Atom Family
-
-![Cross-modal cosine by family](test_outputs/pid_sar3_ssl/ssl_cross_modal_cosine_by_family.png)
-
-*Figure 10. Mean same-sample cross-modal cosine (averaged over modality pairs) stratified by atom family.* The pairwise SimCLR sum shows a stronger global alignment tendency (including on unique atoms, where aggressive alignment is not always desirable), while `tri_positive_infonce` stays closer to neutral/weak-positive alignment and yields better probe scores in this short run.
-
-#### Table 3. Initial SSL Baseline Summary (from `test_outputs/pid_sar3_ssl/ssl_baseline_summary.csv`)
-
-| Objective | Steps | Final loss | 10-way PID probe acc | 3-way family probe acc | Mean cross-modal cosine | Unique cos | Redundancy cos | Synergy cos |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Raw concat (no SSL) | 0 | n/a | 0.099 | 0.359 | 0.001 | -0.006 | 0.006 | 0.001 |
-| Pairwise SimCLR (sum over pairs) | 120 | 5.947 | 0.314 | 0.437 | -0.084 | -0.083 | -0.083 | -0.087 |
-| Tri-positive InfoNCE | 120 | 5.023 | 0.387 | 0.452 | 0.033 | 0.034 | 0.032 | 0.034 |
-
-Reading Table 3:
-
-- The frozen probes improve substantially after SSL training (even in a short CPU run).
-- `tri_positive_infonce` is the strongest of the two initial objectives on both probe tasks here.
-- The pairwise SimCLR sum appears to over-regularize toward a broad cross-modal geometry in this configuration (negative average cosine values), which is plausible given that many samples contain **unique** information in only one modality.
-
-### 6.4 Why This Is Already Informative
-
-This dataset is a good stress test for naive multi-view contrastive learning because the positive pairing assumption is only partially aligned with the data-generating process:
-
-- `R` atoms support cross-modal alignment directly.
-- `S` atoms support structured cross-modal dependence, but not necessarily simple pairwise similarity.
-- `U` atoms can make some cross-modal positive pairs effectively noisy/misaligned.
-
-So a strong result here is not "maximize alignment everywhere"; it is "learn a representation that preserves atom structure without collapsing distinctions."
-
-### 6.5 Next SSL Ideas (Recommended)
-
-The current code now supports easy objective iteration. Strong next candidates:
-
-1. `VICReg-3` / multi-view variance-invariance-covariance regularization.
-2. `Barlow Twins` pairwise over all modality pairs (compare against pairwise SimCLR).
-3. `Joint predictive` objective: predict one modality representation from the other two (`[h_i,h_j] -> h_k`).
-4. `Hybrid contrastive + predictive`: pairwise SimCLR for redundancy, predictive loss for synergy-sensitive transfer.
-5. `Agreement-gated contrastive`: down-weight likely-misaligned positives (especially `U`-heavy batches) using an online confidence score.
-6. `Family-aware evaluation suite`: expand frozen probes to atom-aligned tasks (`y_u1`, `y_r12`, `y_r123`, `y_s12_3`) on learned embeddings, not just raw observations.
-
-### 6.6 Reproducing the SSL Baseline Plots
-
-`pytest` may not be installed in all environments, so the plotting test can be run directly:
-
-```bash
-python - <<'PY'
-from tests.test_pid_sar3_ssl_baselines import test_plot_ssl_baseline_results
-test_plot_ssl_baseline_results()
-print("Saved SSL baseline outputs under test_outputs/pid_sar3_ssl")
-PY
-```
-
-## 7. First Unimodal SSL Experiment: SimCLR Per Modality (Augmentation-Based)
-
-This is the first **strictly unimodal** SSL experiment: train one SimCLR encoder per modality using only augmentation pairs from the same modality (`x1`, `x2`, `x3`), then validate with a held-out **10-way PID-term linear probe**.
-
-This directly answers a key question:
-
-- from a single modality alone, **which of the 10 PID terms are actually being represented** after self-supervised pretraining?
-
-### 7.1 Why This Validation Is the Right First Step
-
-Aggregate accuracy alone is not enough here. A unimodal encoder can improve overall accuracy while still failing to represent specific PID terms (for example, confusing pairwise redundancy atoms or specific synergy directions).
-
-So the validation is intentionally structured as:
-
-- balanced held-out 10-way PID classification (`120` samples per PID term; chance = `0.10`)
-- overall accuracy **and** macro recall
-- per-term recall heatmaps (all 10 PID terms)
-- row-normalized confusion matrices (to inspect which terms get confused)
-- comparison against a raw-modality probe baseline (no SSL)
-
-### 7.2 Experiment Setup (Initial CPU Run)
-
-- three separate encoders: `x1`-only, `x2`-only, `x3`-only
-- objective: unimodal SimCLR (`NT-Xent`) with two augmentations of the same vector
-- augmentations (vector domain): feature dropout + gain scaling + additive jitter
-- training budget: `140` steps, batch size `192`, CPU
-- frozen probe: multinomial logistic regression on the learned representation
+- freeze encoders
+- concatenate representations `[h1,h2,h3]`
+- fit linear probes on held-out data
 
 Implementation entry point:
 
-- `tests/test_pid_sar3_unimodal_simclr.py`
+- `tests/test_pid_sar3_ssl_fused_confusions.py`
 
-### 7.3 Results
+### 6.3 Primary Results: Confusion Matrices (Fused Frozen Validation)
 
-#### Training Curves
+#### PID-10 Confusions (Primary Figure)
 
-![Unimodal SimCLR training losses](test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_training_losses.png)
+![PID-10 confusion matrices, fused frozen encoders](test_outputs/pid_sar3_ssl_fused_confusions/pid10_confusions_fused_frozen_two_models.png)
 
-*Figure 11. Unimodal SimCLR training loss for `x1`, `x2`, and `x3` encoders.* All three runs train stably in this short regime, with final losses around `2.4`.
+*Figure 8. Row-normalized `PID-10` confusion matrices for the two contrastive models using frozen encoders and concatenated modalities (`[h1,h2,h3]`) with a linear probe.* This is the main result figure for SSL comparison at this stage.
 
-#### Probe Summary (10-way PID Terms)
+#### Family-3 Confusions (Secondary but Useful)
 
-![Unimodal SimCLR probe summary](test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_probe_summary.png)
+![Family-3 confusion matrices, fused frozen encoders](test_outputs/pid_sar3_ssl_fused_confusions/family3_confusions_fused_frozen_two_models.png)
 
-*Figure 12. Held-out 10-way PID-term probe performance for each modality (raw vs SimCLR).* The main signal is the improvement over the raw baseline, not the absolute ceiling, because this is a short unimodal pretraining run and each modality only sees part of the PID structure.
+*Figure 9. Row-normalized `Family-3` confusion matrices (`Unique / Redundancy / Synergy`) under the same fused frozen validation protocol.* This complements Figure 8 by showing the coarser failure pattern.
 
-#### Per-Term Recall Heatmap (Most Important)
+### 6.4 What the Confusions Show (Most Important Takeaways)
 
-![Per-PID-term recall heatmap](test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_per_pid_recall_heatmap.png)
+From the fused frozen `PID-10` confusions:
 
-*Figure 13. Per-PID-term recall for the 10-way probe, shown for raw and SimCLR features on each modality.* This is the primary validation plot for understanding which PID terms are represented by each unimodal encoder.
+- Both models strongly confuse **paired redundancy atoms with the matching directional synergy atoms**:
+  - `R12 <-> S12->3`
+  - `R13 <-> S13->2`
+  - `R23 <-> S23->1`
+- This is not noise; it is a consistent structural confusion and should guide the next objective design.
 
-#### Per-Term Recall Gain Heatmap (SimCLR - Raw)
+Model-specific behavior in this run:
 
-![Per-PID-term recall gain heatmap](test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_per_pid_recall_gain_heatmap.png)
+- **Model A (sum of 3 unimodal SimCLR)** is better on PID-term classification overall and preserves stronger diagonal mass on many classes.
+- **Model B (sum of 3 pairwise InfoNCE)** improves latent-target linear recoverability (see Table 3 below), but its `PID-10` confusion matrix is more diffuse, especially for redundancy/triple-redundancy terms.
 
-*Figure 14. Recall gain due to unimodal SimCLR for each PID term and modality.* Positive cells show terms whose single-modality representation improved after augmentation-based SSL.
+Concrete high-count off-diagonal examples (from `fused_frozen_two_models_confusions.csv`):
 
-#### SimCLR Confusion Matrices (Per Modality)
+- Model A:
+  - `S13->2 -> R13` (`51`)
+  - `R23 -> S23->1` (`50`)
+  - `S12->3 -> R12` (`48`)
+- Model B:
+  - `S13->2 -> R13` (`48`)
+  - `S12->3 -> R12` (`45`)
+  - `S23->1 -> R23` (`44`)
 
-![Unimodal SimCLR confusions](test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_confusions.png)
+This is the core result to optimize against, more than a single scalar accuracy.
 
-*Figure 15. Row-normalized confusion matrices for the 10-way PID probe on SimCLR features.* These reveal which PID terms remain systematically confusable within each modality after unimodal pretraining.
+### 6.5 Secondary Summary: All Supervised Tasks (Same Fused Frozen Protocol)
 
-#### Table 4. Unimodal SimCLR Summary (from `test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_summary.csv`)
+Confusions are the primary output for classification tasks, but we still report the full supervised suite under the **same validation protocol**:
 
-| Modality | Raw acc | SimCLR acc | Acc gain | Raw macro recall | SimCLR macro recall | Macro recall gain |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `x1` | 0.096 | 0.178 | +0.082 | 0.096 | 0.178 | +0.082 |
-| `x2` | 0.098 | 0.142 | +0.044 | 0.098 | 0.142 | +0.044 |
-| `x3` | 0.127 | 0.189 | +0.062 | 0.127 | 0.189 | +0.062 |
+- `PID-10` classification
+- `Family-3` classification
+- latent-target regression probes (`y_u1`, `y_r12`, `y_r123`, `y_s12_3`)
 
-All three modalities improve over the raw baseline in this run. `x3` has the best absolute SimCLR probe accuracy (`0.189`), while `x1` shows the largest gain over raw (`+0.082`).
+![All supervised tasks summary](test_outputs/pid_sar3_ssl_fused_confusions/all_supervised_tasks_fused_frozen_two_models.png)
 
-### 7.4 Which PID Terms Are Being Learned? (Validation-Focused Readout)
+*Figure 10. Secondary summary of all supervised tasks using frozen encoders + concatenated modalities + linear probes.* Use this figure to complement the confusion matrices, not replace them.
 
-The answer should be read from **Figure 13 / Figure 14 first**, then checked against the confusion matrices in Figure 15.
+#### Table 3. Fused Frozen Linear-Probe Summary for the Two Models
 
-Selected observations from `test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_per_pid_recall.csv`:
+Source: `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_two_models_task_summary.csv`
 
-- `x1` SimCLR improves several redundancy-linked / target-visible terms:
-  - `R13`: recall `0.108 -> 0.250` (`+0.142`)
-  - `R23`: recall `0.117 -> 0.250` (`+0.133`)
-  - `S23->1`: recall `0.142 -> 0.275` (`+0.133`)
-- `x2` SimCLR improves mainly broad discriminability and some unique-term separation:
-  - `U1`: recall `0.108 -> 0.225` (`+0.117`)
-  - `U3`: recall `0.058 -> 0.175` (`+0.117`)
-  - `R123`: recall `0.092 -> 0.167` (`+0.075`)
-- `x3` SimCLR shows the strongest gain on `R12`:
-  - `R12`: recall `0.083 -> 0.317` (`+0.233`)
-  - also gains on `R13` (`+0.133`) and `U3` (`+0.133`)
-
-Important caveat:
-
-- Some terms decrease for some modalities (for example `x3` on `S13->2` in this run). This is expected in an early unimodal setup because the augmentation invariances and objective may suppress features that are discriminative for specific PID terms.
-
-This is exactly why the per-term validation is necessary: without Figure 13 / Figure 14, those regressions are invisible in the aggregate numbers.
-
-### 7.5 What This Means for Next Steps
-
-Unimodal SimCLR is a good first diagnostic baseline, but it is not enough for PID-sensitive representation learning because:
-
-- it does not use cross-modal correspondence
-- it can learn augment-invariant features that improve generic separability while hurting some PID-specific distinctions
-- it has no mechanism to preserve directional synergy structure explicitly
-
-Recommended next validation-preserving extensions:
-
-1. Add unimodal BYOL/Barlow baselines with the same per-term recall heatmaps for fair comparison.
-2. Add cross-modal objectives and keep the exact same per-term validation protocol (Figures 13-15 style) so changes are interpretable.
-3. Add atom-aligned probes on learned embeddings (`y_u1`, `y_r12`, `y_r123`, `y_s12_3`) to separate "PID-term classification" from "latent-factor recoverability".
-
-### 7.6 Reproducing the Unimodal SimCLR Outputs
-
-```bash
-python - <<'PY'
-from tests.test_pid_sar3_unimodal_simclr import test_plot_unimodal_simclr_pid_term_validation
-test_plot_unimodal_simclr_pid_term_validation()
-print("Saved unimodal SimCLR outputs under test_outputs/pid_sar3_ssl_unimodal")
-PY
-```
-
-### 7.7 Fused Frozen-Encoder Validation (All Modalities Together, Linear Probes)
-
-To match the intended downstream use more closely, we also evaluate the unimodal SimCLR encoders **jointly**:
-
-- train three unimodal SimCLR encoders (`x1`, `x2`, `x3`) independently
-- freeze them
-- concatenate the frozen representations `[h1,h2,h3]`
-- train linear supervised probes on the concatenated representation
-
-This section answers: *if we use all modalities at validation time, how good is the learned representation on the supervised tasks?*
-
-Implementation entry point:
-
-- `tests/test_pid_sar3_unimodal_simclr_fused_validation.py`
-
-#### Validation Tasks (All on Held-Out Data)
-
-- `PID-10` multiclass classification (`pid_id`)
-- `Family-3` classification (`Unique / Redundancy / Synergy`)
-- linear regression probes for latent-derived targets:
-  - `y_u1`
-  - `y_r12`
-  - `y_r123`
-  - `y_s12_3`
-
-The latent-target probes are evaluated on the appropriate masked subsets only (active samples for that target).
-
-#### Fused Validation Figures
-
-![Unimodal SimCLR fused training losses](test_outputs/pid_sar3_ssl_unimodal_fused/unimodal_simclr_fused_training_losses.png)
-
-*Figure 16. Unimodal SimCLR pretraining losses used for the frozen-fusion validation run.* This is a separate run from Figures 11-15 but uses the same setup style.
-
-![Fused supervised tasks summary](test_outputs/pid_sar3_ssl_unimodal_fused/unimodal_simclr_fused_supervised_tasks_summary.png)
-
-*Figure 17. All supervised tasks with frozen unimodal SimCLR encoders, using concatenated modalities (`[h1,h2,h3]`) and linear probes.* This is the requested "all modalities together" validation view.
-
-![Fused supervised task gains](test_outputs/pid_sar3_ssl_unimodal_fused/unimodal_simclr_fused_supervised_task_gains.png)
-
-*Figure 18. Task-wise gain of fused frozen SimCLR features over a raw-concatenation baseline (`[x1,x2,x3]`).* Gains are positive for classification in this run and negative for the latent linear regression probes.
-
-#### Table 5. Fused Frozen-Encoder Supervised Validation (from `test_outputs/pid_sar3_ssl_unimodal_fused/unimodal_simclr_fused_supervised_summary.csv`)
-
-| Task | Raw concat + linear probe | Frozen SimCLR fusion + linear probe | Gain |
+| Task | Model A: sum of 3 unimodal SimCLR | Model B: sum of 3 pairwise InfoNCE | `B - A` |
 | --- | ---: | ---: | ---: |
-| `PID-10` accuracy | 0.095 | 0.371 | +0.276 |
-| `Family-3` accuracy | 0.370 | 0.446 | +0.076 |
-| `R²(y_u1)` | -0.329 | -0.372 | -0.043 |
-| `R²(y_r12)` | -0.100 | -0.473 | -0.373 |
-| `R²(y_r123)` | -0.759 | -0.909 | -0.151 |
-| `R²(y_s12_3)` | -1.488 | -1.867 | -0.379 |
+| `PID-10` accuracy | 0.415 | 0.357 | -0.058 |
+| `Family-3` accuracy | 0.498 | 0.449 | -0.048 |
+| `R²(y_u1)` | -0.407 | -0.234 | +0.173 |
+| `R²(y_r12)` | -0.684 | -0.326 | +0.358 |
+| `R²(y_r123)` | -0.760 | -0.580 | +0.180 |
+| `R²(y_s12_3)` | -0.920 | -0.513 | +0.407 |
 
-#### Interpretation (Important)
+Interpretation:
 
-This result is actually useful:
+- Model A is better for the current **classification-oriented** readout.
+- Model B is better for the current **latent scalar linear recoverability** readout (all `R²` values are still poor/negative, but consistently less bad).
+- The objectives appear to emphasize different geometry, which is exactly what this validation is meant to expose.
 
-- The fused frozen SimCLR representation substantially improves **PID-term classification** (`PID-10`, `Family-3`).
-- But under this short unimodal pretraining regime, it **does not preserve the latent-derived scalar targets linearly** (negative `R²`, often worse than raw).
+### 6.6 What To Improve Next (Based on the Confusions, Not Just Scores)
 
-This is a strong signal that the current unimodal SimCLR setup is learning discriminative invariants for class separation, but not a linearly decodable representation of the latent factors we care about (`U/R/S` latent coordinates).
+The persistent `Rij <-> Sij->k` confusion suggests the current contrastive objectives do not sufficiently separate:
 
-That makes the validation suite better, not worse: it separates two notions of "good":
+- pairwise shared structure (redundancy)
+- directional target-generating structure (synergy)
 
-- good for PID-term classification
-- good for latent-factor recoverability (PID-sensitive linear structure)
+The next objective variants should be judged by whether they reduce those specific off-diagonal bands in Figure 8, not only by aggregate accuracy.
 
-Both should be tracked going forward.
+Promising next directions:
 
-#### Reproducing the Fused Validation
+1. Add a predictive head `([h_i,h_j] -> h_k)` to explicitly model directional structure.
+2. Use a hybrid loss: pairwise contrastive + target prediction, then re-check the `Rij <-> Sij->k` confusion bands.
+3. Probe `h` vs `z` separately (encoder output vs projector output), since SimCLR-style projectors can hide linearly decodable latent structure.
+
+### 6.7 Reproducing the Revised SSL Comparison
 
 ```bash
 python - <<'PY'
-from tests.test_pid_sar3_unimodal_simclr_fused_validation import test_plot_unimodal_simclr_frozen_fusion_supervised_validation
-test_plot_unimodal_simclr_frozen_fusion_supervised_validation()
-print("Saved fused unimodal SimCLR validation outputs under test_outputs/pid_sar3_ssl_unimodal_fused")
+from tests.test_pid_sar3_ssl_fused_confusions import test_plot_fused_confusions_two_models
+test_plot_fused_confusions_two_models()
+print("Saved outputs under test_outputs/pid_sar3_ssl_fused_confusions")
 PY
 ```

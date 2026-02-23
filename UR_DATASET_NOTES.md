@@ -547,7 +547,7 @@ The next objective variants should be judged by whether they reduce those specif
 
 ### 6.8 Higher-Order Alignment Extensions: TRIANGLE-like and ConFu-style (Implemented Comparison)
 
-We implemented two **inspired** (not exact paper-faithful) higher-order objectives to test the hypothesis from Sections 6.4-6.7:
+We implemented two higher-order objectives to test the hypothesis from Sections 6.4-6.7:
 
 - can higher-order tri-modal alignment reduce the `Rij <-> Sij->k` overlap/confusion seen under pairwise-only contrastive training?
 
@@ -556,8 +556,8 @@ Compared methods (same fused frozen validation protocol):
 1. **A: 3x unimodal SimCLR** (augmentation-based, one stream per modality)
 2. **B: pairwise InfoNCE sum** (`(x1,x2) + (x1,x3) + (x2,x3)`)  
    Note: in this codebase, pairwise SimCLR and pairwise InfoNCE are the same NT-Xent form.
-3. **C: TRIANGLE-like** (pairwise InfoNCE + triad shape regularizer to discourage collinear tri-modal geometry)
-4. **D: ConFu-style** (pairwise InfoNCE + fused-pair-to-third contrastive terms)
+3. **C: TRIANGLE (area contrastive)** (triangle-area similarity used inside a symmetric tri-modal contrastive loss; closer to the paper's core idea than the earlier proxy)
+4. **D: ConFu-style (fusion-head)** (pairwise InfoNCE + trainable fused-pair-to-third contrastive terms)
 
 Relevant papers motivating the direction:
 
@@ -568,7 +568,7 @@ Relevant papers motivating the direction:
 
 ![PID-10 confusion matrices, 4-model comparison](test_outputs/pid_sar3_ssl_fused_confusions/pid10_confusions_fused_frozen_four_models.png)
 
-*Figure 11. `PID-10` row-normalized confusion matrices for four SSL objectives under the same fused frozen-encoder linear-probe protocol (`[h1,h2,h3]`).* This is the primary comparison figure for TRIANGLE-like / ConFu-style vs the baselines.
+*Figure 11. `PID-10` row-normalized confusion matrices for four SSL objectives under the same fused frozen-encoder linear-probe protocol (`[h1,h2,h3]`).* This is the primary comparison figure for TRIANGLE / ConFu-style vs the baselines.
 
 #### Geometry + PID Summary (Compact)
 
@@ -583,48 +583,67 @@ Sources:
 - `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_four_models_geometry_summary.csv`
 - `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_four_models_task_summary.csv`
 
-| Model | PID-10 acc | Family-3 acc | Mean matched `R/S` centroid cosine | Mean matched `R/S` NC pair acc | `R²(y_r123)` | `R²(y_s12_3)` |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.381 | 0.478 | 0.703 | 0.525 | -0.605 | -1.317 |
-| B: pairwise InfoNCE sum (pairwise SimCLR/NT-Xent) | 0.339 | 0.419 | 0.915 | 0.531 | -0.474 | -1.208 |
-| C: TRIANGLE-like | 0.362 | 0.431 | 0.940 | 0.531 | -0.200 | -0.738 |
-| D: ConFu-style | 0.344 | 0.424 | 0.933 | 0.540 | -0.307 | -0.746 |
+| Model | PID-10 acc | Family-3 acc | Mean matched `R/S` centroid cosine | Mean matched `R/S` NC pair acc | `R²(y_r12)` | `R²(y_r123)` | `R²(y_s12_3)` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| A: 3x unimodal SimCLR | 0.362 | 0.472 | 0.705 | 0.506 | -0.545 | -0.719 | -1.185 |
+| B: pairwise InfoNCE sum (pairwise SimCLR/NT-Xent) | 0.339 | 0.419 | 0.915 | 0.531 | -0.596 | -0.474 | -1.208 |
+| C: TRIANGLE (area contrastive) | 0.384 | 0.449 | 0.886 | 0.556 | -0.659 | -0.638 | -1.182 |
+| D: ConFu-style (fusion-head) | 0.354 | 0.439 | 0.933 | 0.557 | -0.222 | -0.368 | -0.840 |
 
 #### What Matters (and What Did Not Work Yet)
 
 What improved:
 
-- TRIANGLE-like and ConFu-style significantly improved some latent-target linear recoverability relative to the baselines in this run (especially `R²(y_r123)` and `R²(y_s12_3)`).
-- ConFu-style produced the best mean matched-pair nearest-centroid separability among the four (`0.540`), but only marginally.
+- **TRIANGLE (area contrastive)** improves `PID-10` accuracy over pairwise InfoNCE (`0.384` vs `0.339`) and reduces matched `R/S` centroid overlap (`0.886` vs `0.915`).
+- **TRIANGLE (area contrastive)** also improves matched `R/S` nearest-centroid separability (`0.556` vs `0.531`) and overall margin geometry (see `fused_frozen_four_models_geometry_summary.csv`).
+- **ConFu-style (fusion-head)** is strongest on latent-target linear recoverability for `R²(y_r12)` and improves `R²(y_r123)` / `R²(y_s12_3)` relative to the unimodal baseline.
+- **ConFu-style (fusion-head)** ties for the best mean matched-pair nearest-centroid separability among the four (`0.557`).
 
-What did **not** improve (the main target pathology):
+What did **not** improve enough (the main target pathology):
 
-- Neither TRIANGLE-like nor ConFu-style reduced matched `Rij`/`Sij->k` centroid overlap.
-- In fact, both increased mean matched `R/S` centroid cosine relative to the unimodal SimCLR baseline and remained very high (around `0.93-0.94`), even higher than pairwise InfoNCE in this run.
-- PID-10 confusion structure still shows the same matched-pair `Rij <-> Sij->k` failure mode.
+- The `PID-10` confusion structure still shows the same matched-pair `Rij <-> Sij->k` failure mode across all four models.
+- TRIANGLE improves the geometry relative to pairwise InfoNCE, but matched `R/S` centroid overlap remains high (`0.886`), far from the unimodal baseline's stronger class separation pattern.
+- ConFu-style (fusion-head) improves local matched-pair separability metrics, but global matched `R/S` overlap remains very high (`0.933`).
 
-This is a useful negative result:
+This is a useful result:
 
-- The current proxy implementations of TRIANGLE-like / ConFu-style improve some aspects of representation quality but do **not** solve the central redundancy-vs-synergy separation problem yet.
+- Moving from the earlier TRIANGLE proxy to an **area-contrastive TRIANGLE objective** materially improved the geometry/classification picture.
+- The improved ConFu-style implementation (with a trainable fusion head) is materially better than the earlier simple-fusion proxy on several metrics, especially `R²(y_r12)` and matched-pair local separability.
+- But the higher-order variants still do **not** solve the central redundancy-vs-synergy separation problem yet.
 - The benchmark is doing what it should do: rejecting "plausible" higher-order losses when they fail the geometry/confusion criteria.
 
 #### Self-Critique of These Implementations
 
-These are intentionally lightweight, benchmark-prototyping versions:
+These are still benchmark-prototyping versions:
 
-- **TRIANGLE-like** here is a triad-shape regularized pairwise contrastive loss, not a faithful reimplementation of the TRIANGLE paper.
-- **ConFu-style** here uses a simple fused-pair contrastive term (average-fused pair projected against the third modality), not a full reproduction of the published method.
+- **TRIANGLE (area contrastive)** here uses the paper's triangle-area similarity idea inside a symmetric tri-modal contrastive construction for our setting, but it is not a full task-faithful reproduction of the paper.
+- **ConFu-style (fusion-head)** here uses trainable pair-fusion MLP heads and fused-pair-to-third contrastive terms, but it is still a lightweight proxy and not a faithful reproduction of the published method.
 
 So the conclusion is not "TRIANGLE/ConFu do not work", but:
 
-- **these first inspired proxies** do not reduce the `Rij <-> Sij->k` pathology under our current setup.
+- **these first higher-order implementations** improve some supervised/geometry diagnostics but do not yet eliminate the core `Rij <-> Sij->k` overlap pathology under our current setup.
+
+#### Subset Predictor Diagnostics (What 1/2/3 Modalities Explain)
+
+To inspect what the frozen encoders actually encode, we added linear predictor ablations over modality subsets (`x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`) on the frozen fused representation.
+
+![Subset predictor heatmaps (4 models)](test_outputs/pid_sar3_ssl_fused_confusions/subset_predictor_heatmaps_four_models.png)
+
+*Figure 13. Subset predictor diagnostics using 1-, 2-, and 3-modality frozen features for each model.* This helps distinguish "global PID classification" from "which modality subset linearly carries a given latent target".
+
+A few useful patterns from `fused_frozen_four_models_subset_predictors.csv`:
+
+- For all four models, `y_r12` is often best predicted from a **single modality** (`x2` in this run), indicating the learned geometry is not yet using fused evidence optimally for that target.
+- Pairwise InfoNCE and TRIANGLE improve some single-modality latent readouts (for example `y_r123`) even when their fused `PID-10` confusion remains problematic.
+- ConFu-style (fusion-head) gives the strongest fused `x123` readout for `y_r12` among the four, consistent with its improved `R²(y_r12)` in Table 5.
 
 Promising next directions (still guided by the same confusion + geometry criteria):
 
 1. Add a predictive head `([h_i,h_j] -> h_k)` to explicitly model directional structure.
 2. Use a hybrid loss: pairwise contrastive + target prediction, then re-check the `Rij <-> Sij->k` confusion bands.
 3. Probe `h` vs `z` separately (encoder output vs projector output), since SimCLR-style projectors can hide linearly decodable latent structure.
-4. Replace the proxy TRIANGLE-like / ConFu-style objectives with closer paper-faithful implementations and re-run Figure 11 / Figure 12.
+4. Add directional predictive heads (`[h_i,h_j] -> h_k`) and re-test whether they reduce the `Rij <-> Sij->k` confusion bands.
+5. Implement more paper-faithful TRIANGLE / ConFu variants and re-run Figure 11 / Figure 12 / Figure 13.
 
 ### 6.9 Reproducing the Revised SSL Comparisons
 

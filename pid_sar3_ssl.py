@@ -92,6 +92,21 @@ class Projector(nn.Module):
         return self.net(h)
 
 
+class FusionHead(nn.Module):
+    """Trainable fusion head for pair -> target-style fused contrastive terms."""
+
+    def __init__(self, dim: int, hidden_dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(2 * dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, dim),
+        )
+
+    def forward(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        return self.net(torch.cat([a, b], dim=-1))
+
+
 class TriModalSSLModel(nn.Module):
     """Three independent encoders/projectors for x1, x2, x3 modalities."""
 
@@ -112,6 +127,14 @@ class TriModalSSLModel(nn.Module):
                 "x3": Projector(cfg),
             }
         )
+        # Pair-fusion heads for ConFu-style fused higher-order alignment.
+        self.fusion_heads = nn.ModuleDict(
+            {
+                "x23_to_x1": FusionHead(cfg.projector_dim, cfg.projector_hidden_dim),
+                "x13_to_x2": FusionHead(cfg.projector_dim, cfg.projector_hidden_dim),
+                "x12_to_x3": FusionHead(cfg.projector_dim, cfg.projector_hidden_dim),
+            }
+        )
 
     def encode(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         return {k: self.encoders[k](batch[k]) for k in ("x1", "x2", "x3")}
@@ -123,6 +146,13 @@ class TriModalSSLModel(nn.Module):
         h = self.encode(batch)
         z = self.project(h)
         return h, z
+
+    def fuse_projected(self, z: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        return {
+            "to_x1": self.fusion_heads["x23_to_x1"](z["x2"], z["x3"]),
+            "to_x2": self.fusion_heads["x13_to_x2"](z["x1"], z["x3"]),
+            "to_x3": self.fusion_heads["x12_to_x3"](z["x1"], z["x2"]),
+        }
 
 
 class UnimodalSimCLRModel(nn.Module):
@@ -198,6 +228,71 @@ def _fused_pair(z_a: torch.Tensor, z_b: torch.Tensor) -> torch.Tensor:
     return F.normalize(0.5 * (z_a + z_b), dim=-1)
 
 
+def _triangle_area(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+    """Triangle area A(x,y,z) with unit-normalized embeddings (paper-aligned similarity core)."""
+    x = F.normalize(x, dim=-1)
+    y = F.normalize(y, dim=-1)
+    z = F.normalize(z, dim=-1)
+    u = x - y
+    v = x - z
+    uu = torch.sum(u * u, dim=-1)
+    vv = torch.sum(v * v, dim=-1)
+    uv = torch.sum(u * v, dim=-1)
+    area_sq = torch.clamp(uu * vv - uv * uv, min=0.0)
+    return 0.5 * torch.sqrt(area_sq + 1e-12)
+
+
+def _triangle_logits_vary_target(target: torch.Tensor, p: torch.Tensor, q: torch.Tensor, temperature: float) -> torch.Tensor:
+    """
+    Logits[i,j] = -A(target_j, p_i, q_i)/tau
+    Paper analogue: vary one modality while keeping the paired modalities fixed.
+    """
+    t = F.normalize(target, dim=-1)
+    p = F.normalize(p, dim=-1)
+    q = F.normalize(q, dim=-1)
+    tj = t.unsqueeze(0)  # (1,B,D)
+    pi = p.unsqueeze(1)  # (B,1,D)
+    qi = q.unsqueeze(1)  # (B,1,D)
+    u = tj - pi
+    v = tj - qi
+    uu = torch.sum(u * u, dim=-1)
+    vv = torch.sum(v * v, dim=-1)
+    uv = torch.sum(u * v, dim=-1)
+    area = 0.5 * torch.sqrt(torch.clamp(uu * vv - uv * uv, min=0.0) + 1e-12)
+    return -area / temperature
+
+
+def _triangle_cross_entropy(logits: torch.Tensor) -> torch.Tensor:
+    targets = torch.arange(logits.shape[0], device=logits.device)
+    return F.cross_entropy(logits, targets)
+
+
+def _triangle_exact_symmetric_loss(z: Dict[str, torch.Tensor], temperature: float) -> Tuple[torch.Tensor, Dict[str, float]]:
+    """
+    Symmetric 3-modal TRIANGLE-style contrastive loss inspired by paper Eqs. (5)-(6):
+    for each target modality k with paired modalities (i,j), include:
+    - vary-target term:   A(target_j, pair_i_fixed)
+    - vary-pair term:     A(target_i_fixed, pair_j)
+    """
+    keys = [("x1", "x2", "x3"), ("x2", "x1", "x3"), ("x3", "x1", "x2")]
+    terms = {}
+    losses = []
+    for tgt, p, q in keys:
+        logits_vary_t = _triangle_logits_vary_target(z[tgt], z[p], z[q], temperature)
+        lv = _triangle_cross_entropy(logits_vary_t)
+        # vary pair jointly while target fixed = transpose candidate structure
+        logits_vary_pair = _triangle_logits_vary_target(z[tgt], z[p], z[q], temperature).T
+        lp = _triangle_cross_entropy(logits_vary_pair)
+        terms[f"tri_{p}{q}_to_{tgt}"] = float(lv.detach().cpu())
+        terms[f"tri_{tgt}_to_{p}{q}"] = float(lp.detach().cpu())
+        losses.extend([lv, lp])
+    loss = sum(losses) / float(len(losses))
+    # Mean positive triangle area as a useful diagnostic (lower is tighter triplets).
+    pos_area = _triangle_area(z["x1"], z["x2"], z["x3"]).mean()
+    terms["triangle_pos_area"] = float(pos_area.detach().cpu())
+    return loss, terms
+
+
 def ssl_objective_loss(
     z: Dict[str, torch.Tensor],
     objective: str,
@@ -205,6 +300,7 @@ def ssl_objective_loss(
     triangle_reg_weight: float = 0.15,
     confu_pair_weight: float = 0.5,
     confu_fused_weight: float = 0.5,
+    fused: Optional[Dict[str, torch.Tensor]] = None,
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
     if objective == "pairwise_simclr":
         l12 = _nt_xent_pair(z["x1"], z["x2"], temperature)
@@ -236,18 +332,26 @@ def ssl_objective_loss(
             "loss_23": float(l23.detach().cpu()),
         }
         return loss, metrics
+    if objective == "triangle_exact":
+        return _triangle_exact_symmetric_loss(z, temperature)
     if objective == "confu_style":
         l12 = _nt_xent_pair(z["x1"], z["x2"], temperature)
         l13 = _nt_xent_pair(z["x1"], z["x3"], temperature)
         l23 = _nt_xent_pair(z["x2"], z["x3"], temperature)
         pair_loss = (l12 + l13 + l23) / 3.0
 
-        f23 = _fused_pair(z["x2"], z["x3"])
-        f13 = _fused_pair(z["x1"], z["x3"])
-        f12 = _fused_pair(z["x1"], z["x2"])
-        lf1 = _nt_xent_pair(f23, z["x1"], temperature)
-        lf2 = _nt_xent_pair(f13, z["x2"], temperature)
-        lf3 = _nt_xent_pair(f12, z["x3"], temperature)
+        if fused is None:
+            # Backward-compatible fallback (non-trainable fusion) if no fusion heads are provided.
+            f23 = _fused_pair(z["x2"], z["x3"])
+            f13 = _fused_pair(z["x1"], z["x3"])
+            f12 = _fused_pair(z["x1"], z["x2"])
+            lf1 = _nt_xent_pair(f23, z["x1"], temperature)
+            lf2 = _nt_xent_pair(f13, z["x2"], temperature)
+            lf3 = _nt_xent_pair(f12, z["x3"], temperature)
+        else:
+            lf1 = _nt_xent_pair(fused["to_x1"], z["x1"], temperature)
+            lf2 = _nt_xent_pair(fused["to_x2"], z["x2"], temperature)
+            lf3 = _nt_xent_pair(fused["to_x3"], z["x3"], temperature)
         fused_loss = (lf1 + lf2 + lf3) / 3.0
 
         loss = confu_pair_weight * pair_loss + confu_fused_weight * fused_loss
@@ -292,6 +396,9 @@ def train_ssl(
             batch_np = generator.generate(n=cfg.batch_size, pid_ids=pids)
         batch_t = numpy_batch_to_torch(batch_np, device=str(device))
         _, z = model(batch_t)
+        fused = None
+        if cfg.objective == "confu_style" and hasattr(model, "fuse_projected"):
+            fused = model.fuse_projected(z)  # type: ignore[attr-defined]
         loss, parts = ssl_objective_loss(
             z,
             objective=cfg.objective,
@@ -299,6 +406,7 @@ def train_ssl(
             triangle_reg_weight=cfg.triangle_reg_weight,
             confu_pair_weight=cfg.confu_pair_weight,
             confu_fused_weight=cfg.confu_fused_weight,
+            fused=fused,
         )
 
         opt.zero_grad(set_to_none=True)

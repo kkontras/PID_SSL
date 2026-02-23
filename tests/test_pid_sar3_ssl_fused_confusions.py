@@ -189,6 +189,11 @@ def _concat_trimodal_frozen(model: TriModalSSLModel, batch: Dict[str, np.ndarray
     return np.concatenate([reps["x1"], reps["x2"], reps["x3"]], axis=1).astype(np.float32)
 
 
+def _split_modalities_from_concat(X: np.ndarray) -> Dict[str, np.ndarray]:
+    d = X.shape[1] // 3
+    return {"x1": X[:, :d], "x2": X[:, d : 2 * d], "x3": X[:, 2 * d : 3 * d]}
+
+
 def _train_model_a_unimodal_sum_simclr(gen: PIDSar3DatasetGenerator, enc_cfg: SSLEncoderConfig, train_cfg: SSLTrainConfig) -> Tuple[Dict[str, UnimodalSimCLRModel], List[Dict[str, float]]]:
     aug = VectorAugmenter(VectorAugmentationConfig(jitter_std=0.08, feature_drop_prob=0.08, gain_min=0.92, gain_max=1.08))
     models: Dict[str, UnimodalSimCLRModel] = {}
@@ -246,6 +251,44 @@ def _evaluate_all_tasks(Xtr: np.ndarray, train_batch: Dict[str, np.ndarray], Xte
     out["_pid_cm"] = pid_eval["cm"]  # type: ignore[assignment]
     out["_family_cm"] = fam_eval["cm"]  # type: ignore[assignment]
     return out
+
+
+def _subset_concat(parts: Dict[str, np.ndarray], keys: Tuple[str, ...]) -> np.ndarray:
+    return np.concatenate([parts[k] for k in keys], axis=1).astype(np.float32)
+
+
+def _evaluate_subset_predictors(
+    Xtr: np.ndarray,
+    train_batch: Dict[str, np.ndarray],
+    Xte: np.ndarray,
+    test_batch: Dict[str, np.ndarray],
+) -> List[Dict[str, float]]:
+    parts_tr = _split_modalities_from_concat(Xtr)
+    parts_te = _split_modalities_from_concat(Xte)
+    subsets = [
+        ("x1", ("x1",)),
+        ("x2", ("x2",)),
+        ("x3", ("x3",)),
+        ("x12", ("x1", "x2")),
+        ("x13", ("x1", "x3")),
+        ("x23", ("x2", "x3")),
+        ("x123", ("x1", "x2", "x3")),
+    ]
+    rows: List[Dict[str, float]] = []
+    ytr_pid = train_batch["pid_id"].astype(np.int64)
+    yte_pid = test_batch["pid_id"].astype(np.int64)
+    for subset_name, ks in subsets:
+        Xs_tr = _subset_concat(parts_tr, ks)
+        Xs_te = _subset_concat(parts_te, ks)
+        pid_eval = _fit_classifier_with_confusion(Xs_tr, ytr_pid, Xs_te, yte_pid, labels=np.arange(10))
+        row: Dict[str, float] = {"pid10_acc": float(pid_eval["acc"][0])}
+        for y_key, m_key in [("y_u1", "mask_y_u1"), ("y_r12", "mask_y_r12"), ("y_r123", "mask_y_r123"), ("y_s12_3", "mask_y_s12_3")]:
+            mtr = train_batch[m_key].astype(bool)
+            mte = test_batch[m_key].astype(bool)
+            row[f"{y_key}_r2"] = _fit_ridge_r2(Xs_tr[mtr], train_batch[y_key][mtr], Xs_te[mte], test_batch[y_key][mte])
+        row["subset"] = subset_name  # type: ignore[assignment]
+        rows.append(row)
+    return rows
 
 
 def _plot_two_confusions(cm_a: np.ndarray, cm_b: np.ndarray, labels: List[str], title_a: str, title_b: str, out_path: Path, super_title: str) -> None:
@@ -518,8 +561,8 @@ def test_plot_fused_confusions_four_models_higher_order():
     Four-way fused frozen-encoder comparison:
     - Model A: sum of 3 unimodal SimCLR streams
     - Model B: sum of 3 pairwise InfoNCE losses (pairwise NT-Xent; SimCLR-style)
-    - Model C: TRIANGLE-like (pairwise NT-Xent + triad shape regularizer)
-    - Model D: ConFu-style (pairwise NT-Xent + fused-pair-to-third contrastive terms)
+    - Model C: TRIANGLE exact-style area contrastive
+    - Model D: ConFu-style (pairwise + trainable fused-pair-to-third contrastive terms)
     """
     out_dir = _ensure_plot_dir()
 
@@ -561,7 +604,7 @@ def test_plot_fused_confusions_four_models_higher_order():
     Xtr_b = _concat_trimodal_frozen(model_b, probe_train)
     Xte_b = _concat_trimodal_frozen(model_b, probe_test)
 
-    model_c, hist_c = _train_trimodal_objective(ssl_gen, enc_cfg, base_train_cfg, "triangle_like", "triangle_like")
+    model_c, hist_c = _train_trimodal_objective(ssl_gen, enc_cfg, base_train_cfg, "triangle_exact", "triangle_exact")
     Xtr_c = _concat_trimodal_frozen(model_c, probe_train)
     Xte_c = _concat_trimodal_frozen(model_c, probe_test)
 
@@ -584,12 +627,18 @@ def test_plot_fused_confusions_four_models_higher_order():
         "model_c_triangle_like": _compute_geometry_diagnostics(Xtr_c, ytr_pid, Xte_c, yte_pid),
         "model_d_confu_style": _compute_geometry_diagnostics(Xtr_d, ytr_pid, Xte_d, yte_pid),
     }
+    subset_probe = {
+        "model_a_unimodal_simclr_sum": _evaluate_subset_predictors(Xtr_a, probe_train, Xte_a, probe_test),
+        "model_b_pairwise_infonce_sum": _evaluate_subset_predictors(Xtr_b, probe_train, Xte_b, probe_test),
+        "model_c_triangle_like": _evaluate_subset_predictors(Xtr_c, probe_train, Xte_c, probe_test),
+        "model_d_confu_style": _evaluate_subset_predictors(Xtr_d, probe_train, Xte_d, probe_test),
+    }
 
     model_titles = {
         "model_a_unimodal_simclr_sum": "A: 3x unimodal SimCLR",
         "model_b_pairwise_infonce_sum": "B: pairwise InfoNCE sum\n(pairwise SimCLR/NT-Xent)",
-        "model_c_triangle_like": "C: TRIANGLE-like",
-        "model_d_confu_style": "D: ConFu-style",
+        "model_c_triangle_like": "C: TRIANGLE (area contrastive)",
+        "model_d_confu_style": "D: ConFu-style (fusion-head)",
     }
 
     # Primary figure: 2x2 PID-10 confusion matrices.
@@ -615,7 +664,7 @@ def test_plot_fused_confusions_four_models_higher_order():
 
     # Geometry comparison (compact bar-panel)
     geo_keys = ["model_a_unimodal_simclr_sum", "model_b_pairwise_infonce_sum", "model_c_triangle_like", "model_d_confu_style"]
-    geo_labels = ["A: 3x uni SimCLR", "B: pairwise InfoNCE", "C: TRIANGLE-like", "D: ConFu-style"]
+    geo_labels = ["A: 3x uni SimCLR", "B: pairwise InfoNCE", "C: TRIANGLE exact", "D: ConFu fusion-head"]
     colors = ["#4c78a8", "#f58518", "#54a24b", "#e45756"]
     x = np.arange(4)
     fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.4))
@@ -669,6 +718,28 @@ def test_plot_fused_confusions_four_models_higher_order():
     fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
     fig.subplots_adjust(bottom=0.28)
     _savefig(out_dir / "all_tasks_heatmap_four_models.png")
+
+    # Subset predictor diagnostics (1/2/3 modality probes on frozen features)
+    subset_order = ["x1", "x2", "x3", "x12", "x13", "x23", "x123"]
+    metric_order = ["pid10_acc", "y_u1_r2", "y_r12_r2", "y_r123_r2", "y_s12_3_r2"]
+    metric_labels = ["PID-10 acc", "R2(y_u1)", "R2(y_r12)", "R2(y_r123)", "R2(y_s12_3)"]
+    fig, axes = plt.subplots(2, 2, figsize=(18.5, 12.0))
+    for ax, key in zip(axes.flat, geo_keys):
+        row_map = {str(r["subset"]): r for r in subset_probe[key]}
+        mat_sub = np.array([[float(row_map[s][m]) for m in metric_order] for s in subset_order], dtype=np.float32)
+        im = ax.imshow(mat_sub, aspect="auto", cmap="coolwarm")
+        ax.set_title(model_titles[key])
+        ax.set_xticks(range(len(metric_labels)))
+        ax.set_xticklabels(metric_labels, rotation=20, ha="right")
+        ax.set_yticks(range(len(subset_order)))
+        ax.set_yticklabels(subset_order)
+        for i in range(mat_sub.shape[0]):
+            for j in range(mat_sub.shape[1]):
+                ax.text(j, i, f"{mat_sub[i, j]:.2f}", ha="center", va="center", color="white", fontsize=7)
+    fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.02, pad=0.02)
+    fig.suptitle("Subset predictor diagnostics (1/2/3 modalities; frozen encoders + linear probes)", y=0.99)
+    fig.subplots_adjust(bottom=0.15, wspace=0.28, hspace=0.30)
+    _savefig(out_dir / "subset_predictor_heatmaps_four_models.png")
 
     # CSV summaries
     with (out_dir / "fused_frozen_four_models_task_summary.csv").open("w", encoding="utf-8", newline="") as f:
@@ -724,6 +795,13 @@ def test_plot_fused_confusions_four_models_higher_order():
             for i, li in enumerate(PID_NAMES):
                 for j, lj in enumerate(PID_NAMES):
                     writer.writerow([k, li, lj, int(cm[i, j])])
+
+    with (out_dir / "fused_frozen_four_models_subset_predictors.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["model", "subset", "pid10_acc", "y_u1_r2", "y_r12_r2", "y_r123_r2", "y_s12_3_r2"])
+        for k in geo_keys:
+            for r in subset_probe[k]:
+                writer.writerow([k, r["subset"], r["pid10_acc"], r["y_u1_r2"], r["y_r12_r2"], r["y_r123_r2"], r["y_s12_3_r2"]])
 
     with (out_dir / "fused_frozen_four_models_training_curves.csv").open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["model", "stream", "step", "loss"])

@@ -80,6 +80,75 @@ def _data_cfg_compositional_very_easy(seed: int) -> PIDDatasetConfig:
     )
 
 
+def _named_pid_schedule(name: str) -> Tuple[Tuple[int, ...], Dict[int, int]]:
+    key = str(name).strip().lower()
+    if key in {"", "balanced", "uniform", "none"}:
+        counts = {i: 1 for i in range(10)}
+    elif key in {"imb_l0_redundancy_heavy", "redundancy_heavy", "l0_imbalance"}:
+        # Sum = 100 for readable probabilities in metadata.
+        counts = {
+            0: 10,  # U1
+            1: 10,  # U2
+            2: 10,  # U3
+            3: 15,  # R12
+            4: 15,  # R13
+            5: 15,  # R23
+            6: 15,  # R123
+            7: 4,   # S12->3
+            8: 3,   # S13->2
+            9: 3,   # S23->1
+        }
+    elif key in {"imb_l0_unique_heavy", "unique_heavy"}:
+        counts = {
+            0: 24,  # U1
+            1: 24,  # U2
+            2: 24,  # U3
+            3: 6,   # R12
+            4: 6,   # R13
+            5: 6,   # R23
+            6: 4,   # R123
+            7: 3,   # S12->3
+            8: 2,   # S13->2
+            9: 1,   # S23->1
+        }
+    elif key in {"imb_l0_synergy_heavy", "synergy_heavy"}:
+        counts = {
+            0: 8,   # U1
+            1: 8,   # U2
+            2: 8,   # U3
+            3: 7,   # R12
+            4: 7,   # R13
+            5: 7,   # R23
+            6: 8,   # R123
+            7: 16,  # S12->3
+            8: 16,  # S13->2
+            9: 15,  # S23->1
+        }
+    else:
+        raise ValueError(f"Unknown pid schedule name: {name}")
+    sched: List[int] = []
+    for pid_id in range(10):
+        sched.extend([pid_id] * int(counts[pid_id]))
+    return tuple(sched), counts
+
+
+def _pid_counts_rows(tag: str, counts: Dict[int, int]) -> List[Dict[str, float]]:
+    total = float(sum(int(v) for v in counts.values()))
+    rows: List[Dict[str, float]] = []
+    for pid_id in range(10):
+        c = float(counts.get(pid_id, 0))
+        rows.append(
+            {
+                "schedule_tag": tag,
+                "pid_id": float(pid_id),
+                "pid_name": PID_NAMES[pid_id],
+                "count": c,
+                "probability": (c / total) if total > 0 else 0.0,
+            }
+        )
+    return rows
+
+
 def _fit_classifier_with_confusion(
     Xtr: np.ndarray,
     ytr: np.ndarray,
@@ -2592,6 +2661,10 @@ def test_analysis_bundle_four_models_compositional_very_easy():
     probe_n_per_pid = int(os.getenv("PIDSSL_L0_PROBE_N_PER_PID", "40"))
     n_splits = int(os.getenv("PIDSSL_L0_N_FOLDS", "2"))
     train_device = str(os.getenv("PIDSSL_L0_DEVICE", "cpu"))
+    train_pid_schedule_name = str(os.getenv("PIDSSL_L0_TRAIN_PID_SCHEDULE", "balanced")).strip()
+    output_suffix = str(os.getenv("PIDSSL_L0_OUTPUT_SUFFIX", "")).strip()
+    pid_schedule, pid_counts = _named_pid_schedule(train_pid_schedule_name)
+    suffix = f"_{output_suffix}" if output_suffix else ""
     ssl_gen = PIDSar3DatasetGenerator(data_cfg)
     enc_cfg = SSLEncoderConfig(input_dim=data_cfg.d, encoder_hidden_dim=96, representation_dim=48, projector_hidden_dim=96, projector_dim=48)
     train_cfg = SSLTrainConfig(
@@ -2607,10 +2680,16 @@ def test_analysis_bundle_four_models_compositional_very_easy():
         confu_fused_weight=0.5,
     )
 
-    unimodal_models, _ = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, train_cfg)
-    model_b, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce")
-    model_c, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "triangle_exact", "triangle_exact")
-    model_d, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "confu_style", "confu_style")
+    unimodal_models, _ = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, train_cfg, pid_schedule=pid_schedule)
+    model_b, _ = _train_trimodal_objective(
+        ssl_gen, enc_cfg, train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce", pid_schedule=pid_schedule
+    )
+    model_c, _ = _train_trimodal_objective(
+        ssl_gen, enc_cfg, train_cfg, "triangle_exact", "triangle_exact", pid_schedule=pid_schedule
+    )
+    model_d, _ = _train_trimodal_objective(
+        ssl_gen, enc_cfg, train_cfg, "confu_style", "confu_style", pid_schedule=pid_schedule
+    )
     if train_device != "cpu":
         for m in unimodal_models.values():
             m.cpu()
@@ -2690,7 +2769,7 @@ def test_analysis_bundle_four_models_compositional_very_easy():
                     kappa_fold_rows[-1]["source"] = src  # type: ignore[assignment]
                     kappa_fold_rows[-1]["target"] = tgt  # type: ignore[assignment]
 
-    kappa_prefix = "compositional_very_easy_source_to_target_four_models_5fold"
+    kappa_prefix = f"compositional_very_easy_source_to_target_four_models_5fold{suffix}"
     with (out_dir / f"{kappa_prefix}_per_fold.csv").open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(
             f, fieldnames=["fold", "model", "model_label", "source", "target", "macro_f1", "macro_kappa", "n_target_dims"]
@@ -2794,7 +2873,7 @@ def test_analysis_bundle_four_models_compositional_very_easy():
                     rr.update({"model": mkey, "model_label": model_labels[mkey], "source": src, "target": tgt})
                     retrieval_strat_rows.append(rr)
 
-    retrieval_prefix = "compositional_very_easy_retrieval_source_to_target_four_models"
+    retrieval_prefix = f"compositional_very_easy_retrieval_source_to_target_four_models{suffix}"
     with (out_dir / f"{retrieval_prefix}_summary.csv").open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(
             f, fieldnames=["model", "model_label", "source", "target", "recall_at_1", "recall_at_5", "mrr", "n"]
@@ -2851,7 +2930,7 @@ def test_analysis_bundle_four_models_compositional_very_easy():
                         row["target"] = tgt  # type: ignore[assignment]
                         recon_fold_rows.append(row)
 
-    recon_prefix = "compositional_very_easy_source_to_target_reconstruction_four_models_5fold"
+    recon_prefix = f"compositional_very_easy_source_to_target_reconstruction_four_models_5fold{suffix}"
     with (out_dir / f"{recon_prefix}_per_fold.csv").open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(
             f,
@@ -2919,6 +2998,30 @@ def test_analysis_bundle_four_models_compositional_very_easy():
         )
         writer.writeheader()
         for r in recon_group_rows:
+            writer.writerow(r)
+
+    with (out_dir / f"compositional_very_easy_analysis_bundle_metadata{suffix}.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["output_suffix", "train_pid_schedule_name", "ssl_steps", "probe_n_per_pid", "n_folds", "train_device"],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "output_suffix": output_suffix,
+                "train_pid_schedule_name": train_pid_schedule_name,
+                "ssl_steps": float(ssl_steps),
+                "probe_n_per_pid": float(probe_n_per_pid),
+                "n_folds": float(n_splits),
+                "train_device": train_device,
+            }
+        )
+    with (out_dir / f"compositional_very_easy_analysis_bundle_train_pid_mix{suffix}.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as f:
+        writer = csv.DictWriter(f, fieldnames=["schedule_tag", "pid_id", "pid_name", "count", "probability"])
+        writer.writeheader()
+        for r in _pid_counts_rows(train_pid_schedule_name, pid_counts):
             writer.writerow(r)
 
     assert len(kappa_summary_rows) == 4 * 4 * 3

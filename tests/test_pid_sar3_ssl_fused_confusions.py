@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import accuracy_score, cohen_kappa_score, confusion_matrix, f1_score
+from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +90,42 @@ def _fit_ridge_r2(Xtr: np.ndarray, ytr: np.ndarray, Xte: np.ndarray, yte: np.nda
     ss_res = float(np.sum((yte - pred) ** 2))
     ss_tot = float(np.sum((yte - np.mean(yte)) ** 2)) + 1e-8
     return float(1.0 - ss_res / ss_tot)
+
+
+def _fit_binary_macro_f1_kappa_over_target_dims(
+    Xtr: np.ndarray,
+    Ytr: np.ndarray,
+    Xte: np.ndarray,
+    Yte: np.ndarray,
+) -> Dict[str, float]:
+    """
+    Predict a target modality vector dimension-wise as median-thresholded binary tasks.
+    Returns macro averages over target dimensions for F1 and Cohen's kappa.
+    """
+    scaler = StandardScaler()
+    Xtr_s = scaler.fit_transform(Xtr)
+    Xte_s = scaler.transform(Xte)
+    f1s: List[float] = []
+    kappas: List[float] = []
+    d = int(Ytr.shape[1])
+    for j in range(d):
+        thr = float(np.median(Ytr[:, j]))
+        ytr = (Ytr[:, j] > thr).astype(np.int64)
+        yte = (Yte[:, j] > thr).astype(np.int64)
+        # Guard pathological constant-label folds (rare with continuous values, but possible).
+        if int(np.unique(ytr).size) < 2:
+            pred = np.full_like(yte, fill_value=int(ytr[0]))
+        else:
+            clf = LogisticRegression(max_iter=1000, random_state=0)
+            clf.fit(Xtr_s, ytr)
+            pred = clf.predict(Xte_s).astype(np.int64)
+        f1s.append(float(f1_score(yte, pred, zero_division=0)))
+        kappas.append(float(cohen_kappa_score(yte, pred)))
+    return {
+        "macro_f1": float(np.mean(f1s)),
+        "macro_kappa": float(np.mean(kappas)),
+        "n_target_dims": float(d),
+    }
 
 
 def _prepare_geometry_space(Xtr: np.ndarray, Xte: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -287,6 +324,16 @@ def _mean_ci95(values: List[float]) -> Dict[str, float]:
         "ci95_low": float(mean - half),
         "ci95_high": float(mean + half),
     }
+
+
+def _slice_batch(batch: Dict[str, np.ndarray], idx: np.ndarray) -> Dict[str, np.ndarray]:
+    out: Dict[str, np.ndarray] = {}
+    for k, v in batch.items():
+        if isinstance(v, np.ndarray) and v.shape[0] == batch["pid_id"].shape[0]:
+            out[k] = v[idx]
+        else:
+            out[k] = v
+    return out
 
 
 def _subset_concat(parts: Dict[str, np.ndarray], keys: Tuple[str, ...]) -> np.ndarray:
@@ -1134,3 +1181,204 @@ def test_main_results_four_models_repeated_seed_summary():
     _savefig(out_dir / "main_results_four_models_seeded_summary.png")
 
     assert len(raw_rows) == repeats * 4
+
+
+def test_source_to_target_four_models_kappa_5fold():
+    """
+    Regenerate source->target results with 5-fold probe evaluation and export macro-kappa.
+
+    This produces a table-ready artifact for the main results section (`7a/7/7b`)
+    with kappa as the primary metric and macro-F1 retained for comparability.
+    """
+    out_dir = _ensure_plot_dir()
+
+    data_cfg = PIDDatasetConfig(
+        d=32,
+        m=8,
+        sigma=0.45,
+        rho_choices=(0.2, 0.5, 0.8),
+        hop_choices=(1, 2, 3, 4),
+        seed=3401,
+        deleakage_fit_samples=1024,
+    )
+    ssl_gen = PIDSar3DatasetGenerator(data_cfg)
+    enc_cfg = SSLEncoderConfig(input_dim=data_cfg.d, encoder_hidden_dim=96, representation_dim=48, projector_hidden_dim=96, projector_dim=48)
+    base_train_cfg = SSLTrainConfig(
+        lr=1e-3,
+        weight_decay=1e-5,
+        batch_size=192,
+        steps=180,
+        temperature=0.2,
+        device="cpu",
+        seed=91,
+        triangle_reg_weight=0.15,
+        confu_pair_weight=0.5,
+        confu_fused_weight=0.5,
+    )
+
+    # Train once, evaluate on 5 probe folds (same world).
+    unimodal_models, _ = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, base_train_cfg)
+    model_b, _ = _train_trimodal_objective(ssl_gen, enc_cfg, base_train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce")
+    model_c, _ = _train_trimodal_objective(ssl_gen, enc_cfg, base_train_cfg, "triangle_exact", "triangle_exact")
+    model_d, _ = _train_trimodal_objective(ssl_gen, enc_cfg, base_train_cfg, "confu_style", "confu_style")
+
+    probe_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": data_cfg.seed}))
+    probe_all = _balanced_batch(probe_gen, n_per_pid=250, shuffle_seed=777, return_aux=True)
+    y_all_pid = probe_all["pid_id"].astype(np.int64)
+
+    X_all = {
+        "A": _concat_unimodal_frozen(unimodal_models, probe_all),
+        "B": _concat_trimodal_frozen(model_b, probe_all),
+        "C": _concat_trimodal_frozen(model_c, probe_all),
+        "D": _concat_trimodal_frozen(model_d, probe_all),
+    }
+    model_labels = {
+        "A": "A: 3x unimodal SimCLR",
+        "B": "B: pairwise InfoNCE",
+        "C": "C: TRIANGLE",
+        "D": "D: ConFu",
+    }
+    source_map = {
+        "1": ("x1",),
+        "2": ("x2",),
+        "3": ("x3",),
+        "12": ("x1", "x2"),
+        "13": ("x1", "x3"),
+        "23": ("x2", "x3"),
+        "123": ("x1", "x2", "x3"),
+    }
+    target_keys = {"1": "x1", "2": "x2", "3": "x3"}
+
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=17)
+    fold_rows: List[Dict[str, float]] = []
+    for fold_idx, (tr_idx, te_idx) in enumerate(skf.split(np.zeros_like(y_all_pid), y_all_pid), start=1):
+        batch_tr = _slice_batch(probe_all, tr_idx)
+        batch_te = _slice_batch(probe_all, te_idx)
+        for mkey, X in X_all.items():
+            Xtr = X[tr_idx]
+            Xte = X[te_idx]
+            parts_tr = _split_modalities_from_concat(Xtr)
+            parts_te = _split_modalities_from_concat(Xte)
+            for src, src_keys in source_map.items():
+                Xsrc_tr = _subset_concat(parts_tr, src_keys)
+                Xsrc_te = _subset_concat(parts_te, src_keys)
+                for tgt in ("1", "2", "3"):
+                    metrics = _fit_binary_macro_f1_kappa_over_target_dims(
+                        Xsrc_tr,
+                        batch_tr[target_keys[tgt]].astype(np.float32),
+                        Xsrc_te,
+                        batch_te[target_keys[tgt]].astype(np.float32),
+                    )
+                    fold_rows.append(
+                        {
+                            "fold": float(fold_idx),
+                            "model": 0.0,  # placeholder
+                            "model_label": 0.0,  # placeholder
+                            "source": 0.0,  # placeholder
+                            "target": 0.0,  # placeholder
+                            "macro_f1": float(metrics["macro_f1"]),
+                            "macro_kappa": float(metrics["macro_kappa"]),
+                            "n_target_dims": float(metrics["n_target_dims"]),
+                        }
+                    )
+                    fold_rows[-1]["model"] = mkey  # type: ignore[assignment]
+                    fold_rows[-1]["model_label"] = model_labels[mkey]  # type: ignore[assignment]
+                    fold_rows[-1]["source"] = src  # type: ignore[assignment]
+                    fold_rows[-1]["target"] = tgt  # type: ignore[assignment]
+
+    with (out_dir / "source_to_target_four_models_5fold_per_fold.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["fold", "model", "model_label", "source", "target", "macro_f1", "macro_kappa", "n_target_dims"],
+        )
+        writer.writeheader()
+        for r in fold_rows:
+            writer.writerow(r)
+
+    # Aggregate mean ± SE by (model, source, target)
+    grouped: Dict[Tuple[str, str, str], List[Dict[str, float]]] = {}
+    for r in fold_rows:
+        key = (str(r["model"]), str(r["source"]), str(r["target"]))
+        grouped.setdefault(key, []).append(r)
+
+    summary_rows: List[Dict[str, float]] = []
+    for (m, src, tgt), rows in grouped.items():
+        f1_stats = _mean_ci95([float(r["macro_f1"]) for r in rows])
+        k_stats = _mean_ci95([float(r["macro_kappa"]) for r in rows])
+        summary_rows.append(
+            {
+                "model": 0.0,  # placeholder
+                "model_label": 0.0,  # placeholder
+                "source": 0.0,  # placeholder
+                "target": 0.0,  # placeholder
+                "n_folds": float(len(rows)),
+                "macro_f1_mean": float(f1_stats["mean"]),
+                "macro_f1_se": float(f1_stats["se"]),
+                "macro_kappa_mean": float(k_stats["mean"]),
+                "macro_kappa_se": float(k_stats["se"]),
+            }
+        )
+        summary_rows[-1]["model"] = m  # type: ignore[assignment]
+        summary_rows[-1]["model_label"] = model_labels[m]  # type: ignore[assignment]
+        summary_rows[-1]["source"] = src  # type: ignore[assignment]
+        summary_rows[-1]["target"] = tgt  # type: ignore[assignment]
+
+    summary_rows.sort(key=lambda r: (str(r["model"]), len(str(r["source"])), str(r["source"]), str(r["target"])))
+    with (out_dir / "source_to_target_four_models_5fold_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "model",
+                "model_label",
+                "source",
+                "target",
+                "n_folds",
+                "macro_f1_mean",
+                "macro_f1_se",
+                "macro_kappa_mean",
+                "macro_kappa_se",
+            ],
+        )
+        writer.writeheader()
+        for r in summary_rows:
+            writer.writerow(r)
+
+    # Grouped 7a-style summary on kappa and F1
+    def _group_name(src: str, tgt: str) -> str:
+        if len(src) == 1 and src == tgt:
+            return "self_1to1"
+        if len(src) == 1 and src != tgt:
+            return "single_cross"
+        if len(src) == 2 and tgt not in src:
+            return "pair_to_heldout_target"
+        if len(src) == 2 and tgt in src:
+            return "pair_to_member_target"
+        if len(src) == 3:
+            return "triple_to_target"
+        return "other"
+
+    grouped_rows: List[Dict[str, float]] = []
+    by_model_group: Dict[Tuple[str, str], List[Dict[str, float]]] = {}
+    for r in summary_rows:
+        g = _group_name(str(r["source"]), str(r["target"]))
+        by_model_group.setdefault((str(r["model"]), g), []).append(r)
+    for (m, g), rows in by_model_group.items():
+        grouped_rows.append(
+            {
+                "model": 0.0,
+                "model_label": 0.0,
+                "group": 0.0,
+                "macro_f1_mean": float(np.mean([float(r["macro_f1_mean"]) for r in rows])),
+                "macro_kappa_mean": float(np.mean([float(r["macro_kappa_mean"]) for r in rows])),
+            }
+        )
+        grouped_rows[-1]["model"] = m  # type: ignore[assignment]
+        grouped_rows[-1]["model_label"] = model_labels[m]  # type: ignore[assignment]
+        grouped_rows[-1]["group"] = g  # type: ignore[assignment]
+    with (out_dir / "source_to_target_four_models_5fold_grouped_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["model", "model_label", "group", "macro_f1_mean", "macro_kappa_mean"])
+        writer.writeheader()
+        for r in grouped_rows:
+            writer.writerow(r)
+
+    assert len(summary_rows) == 4 * 7 * 3

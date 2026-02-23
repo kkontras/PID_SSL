@@ -6,7 +6,7 @@ This document reports the primary SSL results for PID-SAR-3++. It presents the c
 
 The section numbering below is preserved from the original SSL report to keep table/figure references stable.
 
-Main finding: on the primary source->target downstream benchmark (Section `6.8.1`), **TRIANGLE** is best on the grouped cross-modal pair->heldout-target tasks and wins two of the three rotated pair->target directions, **ConFu** is competitive and wins one rotated direction, **pairwise InfoNCE** is consistently strong, and **unimodal SimCLR** remains near the cross-modal floor despite near-ceiling self/overcomplete predictions.
+Main finding: on the regenerated 5-fold source->target evaluation reported with **Cohen's \(\kappa\)** (Section `6.8.1`), all methods are near chance on the hardest cross-modal pair->heldout-target tasks in this setup, while self/overcomplete tasks remain strong; the main practical conclusion is therefore that **the current training/evaluation regime is not yet producing robust cross-modal transfer under a chance-corrected metric**.
 
 ### 6.1 Evaluation Protocol (Important Correction)
 
@@ -23,12 +23,6 @@ Implementation:
 To avoid presenting the benchmark as a single-seed leaderboard, the main results are defined as a small set of decision metrics reported with uncertainty across repeated runs. In practice, we report the sample mean \(\bar{x}\) together with the standard error \(\mathrm{SE}=s/\sqrt{n}\), where \(s\) is the sample standard deviation over runs and \(n\) is the number of runs.
 
 The main text prioritizes one ranking target (the source->target matrix in Section `6.8.1`) together with a small number of failure-mode diagnostics, while broader sweeps and auxiliary tables are moved to the appendix.
-
-Implementation artifact (repeated-seed summary):
-
-- `test_outputs/pid_sar3_ssl_fused_confusions/main_results_four_models_seeded_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/main_results_four_models_seeded_trials.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/main_results_four_models_seeded_summary.png`
 
 ### 6.1.2 Repeated-Seed Secondary Diagnostics Snapshot (Quick CPU Run, `n=3`)
 
@@ -168,7 +162,7 @@ The main downstream benchmark uses modalities directly. Given frozen encoder fea
 
 This design avoids making a hand-crafted latent proxy the primary target. Instead, it asks whether the learned representation supports actual cross-modal prediction.
 
-Main result (one sentence): **TRIANGLE is strongest on the cross-modal pair->heldout-target group on average, ConFu is competitive and wins one rotated direction, pairwise InfoNCE is consistently strong, and unimodal SimCLR remains near the cross-modal floor despite near-ceiling self/overcomplete predictions.**
+Main result (one sentence): **under 5-fold macro-\(\kappa\), self/overcomplete source->target tasks remain strong but the cross-modal pair->heldout-target tasks are near chance for all methods, indicating that this regime does not yet support strong chance-corrected cross-modal prediction.**
 
 Presentation order in this section:
 
@@ -177,24 +171,27 @@ Presentation order in this section:
 
 Before the full matrix, we report a grouped summary to separate near-ceiling sanity checks from genuinely discriminative cross-modal tasks.
 
-#### Table 7a. Grouped Summary Of The All Source->Target Matrix (macro-F1 averages over task groups; A-D only)
+#### Table 7a. Grouped Summary Of The All Source->Target Matrix (macro-\(\kappa\) averages over task groups; A-D only, 5-fold)
 
-Source: `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
+Sources:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_grouped_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_summary.csv`
 
 | Model | self `1->1/2->2/3->3` | single cross-modal (`1->2`, etc.) | pair->heldout target (`23->1`, `13->2`, `12->3`) | pair->member target (`12->1`, etc.) | `123->target` |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.987 | 0.511 | 0.516 | 0.984 | 0.981 |
-| B: pairwise InfoNCE | 0.986 | 0.614 | 0.639 | 0.982 | 0.978 |
-| C: TRIANGLE | 0.986 | 0.615 | 0.651 | 0.982 | 0.979 |
-| D: ConFu | 0.986 | 0.600 | 0.629 | 0.982 | 0.979 |
+| A: 3x unimodal SimCLR | 0.659 | 0.014 | 0.020 | 0.646 | 0.634 |
+| B: pairwise InfoNCE | 0.554 | 0.013 | 0.017 | 0.539 | 0.524 |
+| C: TRIANGLE | 0.536 | 0.010 | 0.014 | 0.521 | 0.507 |
+| D: ConFu | 0.558 | 0.009 | 0.013 | 0.545 | 0.532 |
 
-For each model \(m\) and task group \(G\), the grouped score is the mean \(\bar{F}_{m,G} = \frac{1}{|G|}\sum_{t\in G} F_1(m,t)\), where \(t\) indexes source->target tasks in that group.
+For each model \(m\) and task group \(G\), the grouped score is the mean \(\bar{\kappa}_{m,G} = \frac{1}{|G|}\sum_{t\in G} \kappa(m,t)\), where \(t\) indexes source->target tasks in that group.
 
 Main findings from Table 7a:
 
-- Self-prediction and overcomplete settings (`pair->member`, `123->target`) are near-ceiling for all methods, so they are sanity checks, not ranking metrics.
-- The ranking signal lives in the **cross-modal** groups, especially **pair->heldout target**.
-- `C: TRIANGLE` is strongest on the grouped pair->heldout target average; `B: pairwise InfoNCE` is close; `D: ConFu` remains competitive; `A` is near the cross-modal floor.
+- Self-prediction and overcomplete settings (`pair->member`, `123->target`) remain strong under \(\kappa\), but they are still sanity checks rather than ranking metrics.
+- The discriminative part of the benchmark is the **cross-modal** groups, and under \(\kappa\) these scores are close to zero in the current regime.
+- On the grouped pair->heldout-target average, differences are small (`A > B > C > D` here), which argues for improving the experimental regime before making strong method-ranking claims.
 
 Task construction is dimension-wise binary prediction on the target modality. For each target dimension, we threshold the raw target value at the train-split median (which yields approximately balanced classes), fit a linear classifier from frozen source features, and average performance across target dimensions.
 
@@ -211,6 +208,10 @@ Primary pair->target artifacts:
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_heatmaps.png`
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1_heatmaps.png`
+- `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_summary.csv` (5-fold macro-F1 and macro-\(\kappa\))
+- `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_grouped_summary.csv` (5-fold grouped summary)
+
+Figures 12-14 are legacy macro-F1 visualizations retained for qualitative structure. Tables 7a/7/7b below are the regenerated **5-fold macro-\(\kappa\)** results (with macro-F1 retained in the CSV exports for comparison).
 
 ![Rotated pair->target downstream summary](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.png)
 
@@ -224,62 +225,58 @@ Primary pair->target artifacts:
 
 *Figure 14. Main downstream result: all source->target rotations (`1/2/3/12/13/23/123 -> 1/2/3`) reported as macro-F1 for A-D (frozen encoders). Includes self-prediction rows such as `1->1` and cross-modal rows such as `2->1`.*
 
-#### Table 7. Focused Excerpt From The Main Matrix: Rotated Pair->Target Results (frozen encoders, held-out test)
+#### Table 7. Focused Excerpt From The Main Matrix: Rotated Pair->Target Results (macro-\(\kappa\), 5-fold mean \(\pm\) SE)
 
 Sources:
 
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_overall_rotation_scores.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_summary.csv`
 
-| Model | `23->1` macro-F1 / \(\kappa\) | `13->2` macro-F1 / \(\kappa\) | `12->3` macro-F1 / \(\kappa\) |
+| Model | `23->1` \(\kappa\) | `13->2` \(\kappa\) | `12->3` \(\kappa\) |
 | --- | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.520 / 0.037 | 0.518 / 0.039 | 0.514 / 0.027 |
-| B: pairwise InfoNCE | 0.628 / 0.261 | 0.649 / 0.296 | 0.640 / 0.283 |
-| C: TRIANGLE | 0.643 / 0.289 | 0.655 / 0.311 | 0.653 / 0.309 |
-| D: ConFu | 0.647 / 0.296 | 0.599 / 0.199 | 0.640 / 0.279 |
+| A: 3x unimodal SimCLR | 0.024 ± 0.002 | 0.016 ± 0.005 | 0.021 ± 0.002 |
+| B: pairwise InfoNCE | 0.024 ± 0.003 | 0.018 ± 0.004 | 0.009 ± 0.006 |
+| C: TRIANGLE | 0.014 ± 0.003 | 0.009 ± 0.005 | 0.019 ± 0.003 |
+| D: ConFu | 0.015 ± 0.003 | 0.012 ± 0.002 | 0.012 ± 0.003 |
 
 Rotation-level highlights:
 
-- `23->1`: **D** is strongest on macro-F1 (`0.647`), with `C` close (`0.643`)
-- `13->2`: **C** is strongest (`0.655`)
-- `12->3`: **C** is strongest (`0.653`)
+- `23->1`: `A` and `B` are effectively tied at the top within the reported SE (`\kappa \approx 0.024`)
+- `13->2`: `B` is highest (`\kappa \approx 0.018`)
+- `12->3`: `A` is highest (`\kappa \approx 0.021`), with `C` close (`\kappa \approx 0.019`)
 
 Interpretation of the rotated pair->target slice:
 
-- **Cross-modal methods clearly outperform unimodal SimCLR** on the pair->target tasks in both macro-F1 and \(\kappa\) (model A remains near the cross-modal floor).
-- **TRIANGLE is the strongest method across two of the three rotations** (`13->2`, `12->3`) when reporting macro-F1 directly.
-- **ConFu** is competitive and strongest on one rotation (`23->1`).
-- **Pairwise InfoNCE** is consistently strong and clearly above unimodal SimCLR on all three rotations.
+- Under the regenerated 5-fold \(\kappa\) evaluation, all three rotated pair->target tasks are **close to chance** for all methods (\(\kappa\) values near zero).
+- The ordering is therefore much less stable and much less important than the stronger conclusion: **the regime needs improvement before chance-corrected cross-modal claims are convincing**.
+- The macro-F1-based legacy plots remain useful for qualitative comparison, but they overstate practical separability relative to \(\kappa\).
 
-#### Table 7b. Main Result Matrix: All Source->Target Rotations (macro-F1, A-D only)
+#### Table 7b. Main Result Matrix: All Source->Target Rotations (macro-\(\kappa\), A-D only, 5-fold means)
 
-Source: `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
-
-Current artifact note: the checked-in `7b` source table stores macro-F1 only. The corresponding rotated-slice CSV (`tuned_long_steps_600_pair_to_target_overall_rotation_scores.csv`) stores `macro_kappa`, which is why \(\kappa\) is shown in Table 7 but not yet in Table 7b.
+Source: `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_summary.csv`
 
 | Source->Target | A | B | C | D |
 | --- | ---: | ---: | ---: | ---: |
-| `1->1` | 0.988 | 0.985 | 0.986 | 0.986 |
-| `2->1` | 0.513 | 0.610 | 0.609 | 0.592 |
-| `3->1` | 0.508 | 0.601 | 0.613 | 0.627 |
-| `12->1` | 0.984 | 0.982 | 0.981 | 0.983 |
-| `13->1` | 0.984 | 0.981 | 0.982 | 0.982 |
-| `23->1` | 0.515 | 0.628 | 0.643 | 0.647 |
-| `123->1` | 0.981 | 0.978 | 0.978 | 0.979 |
-| `1->2` | 0.513 | 0.612 | 0.611 | 0.581 |
-| `2->2` | 0.987 | 0.986 | 0.986 | 0.986 |
-| `3->2` | 0.512 | 0.632 | 0.621 | 0.585 |
-| `12->2` | 0.984 | 0.982 | 0.982 | 0.982 |
-| `13->2` | 0.516 | 0.649 | 0.655 | 0.599 |
-| `23->2` | 0.984 | 0.982 | 0.982 | 0.982 |
-| `123->2` | 0.981 | 0.979 | 0.979 | 0.979 |
-| `1->3` | 0.507 | 0.608 | 0.619 | 0.623 |
-| `2->3` | 0.510 | 0.620 | 0.616 | 0.590 |
-| `3->3` | 0.987 | 0.985 | 0.986 | 0.986 |
-| `12->3` | 0.517 | 0.640 | 0.653 | 0.640 |
-| `13->3` | 0.984 | 0.981 | 0.983 | 0.983 |
-| `23->3` | 0.984 | 0.982 | 0.982 | 0.983 |
-| `123->3` | 0.981 | 0.978 | 0.980 | 0.980 |
+| `1->1` | 0.654 | 0.559 | 0.541 | 0.560 |
+| `2->1` | 0.017 | 0.014 | 0.001 | 0.005 |
+| `3->1` | 0.020 | 0.024 | 0.016 | 0.019 |
+| `12->1` | 0.641 | 0.544 | 0.527 | 0.551 |
+| `13->1` | 0.643 | 0.543 | 0.525 | 0.544 |
+| `23->1` | 0.024 | 0.024 | 0.014 | 0.015 |
+| `123->1` | 0.631 | 0.529 | 0.513 | 0.533 |
+| `1->2` | 0.011 | 0.010 | 0.004 | 0.014 |
+| `2->2` | 0.662 | 0.557 | 0.538 | 0.550 |
+| `3->2` | 0.006 | 0.012 | 0.009 | 0.002 |
+| `12->2` | 0.646 | 0.543 | 0.519 | 0.536 |
+| `13->2` | 0.016 | 0.018 | 0.009 | 0.012 |
+| `23->2` | 0.648 | 0.541 | 0.523 | 0.536 |
+| `123->2` | 0.634 | 0.526 | 0.505 | 0.522 |
+| `1->3` | 0.017 | 0.012 | 0.013 | 0.008 |
+| `2->3` | 0.013 | 0.003 | 0.014 | 0.006 |
+| `3->3` | 0.662 | 0.547 | 0.530 | 0.564 |
+| `12->3` | 0.021 | 0.009 | 0.019 | 0.012 |
+| `13->3` | 0.650 | 0.533 | 0.517 | 0.551 |
+| `23->3` | 0.650 | 0.531 | 0.518 | 0.550 |
+| `123->3` | 0.637 | 0.518 | 0.504 | 0.540 |
 
 Reading guide (how to use the main matrix):
 

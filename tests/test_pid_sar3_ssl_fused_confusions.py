@@ -2252,3 +2252,118 @@ def test_pair_to_heldout_retrieval_applicability_low_noise_redundancy_train_only
             writer.writerow(r)
 
     assert len(rows) == 5 * 3 * 3
+
+
+def test_compositional_easy_raw_retrieval_sanity():
+    """
+    Sanity-check a compositional dataset mode where cross-modal retrieval should be
+    feasible before increasing difficulty.
+
+    This is a dataset benchmarkability test (RAW observations only), not an SSL
+    model comparison.
+    """
+    out_dir = _ensure_plot_dir()
+    cfg = PIDDatasetConfig(
+        d=32,
+        m=8,
+        sigma=0.03,
+        rho_choices=(0.5, 0.8),
+        hop_choices=(1, 2),
+        seed=3801,
+        deleakage_fit_samples=1024,
+        composition_mode="multi_atom",
+        active_atoms_per_sample=4,
+        shared_backbone_gain=2.5,
+        shared_backbone_tied_projection=True,
+        synergy_deleak_lambda=0.5,
+    )
+    gen = PIDSar3DatasetGenerator(cfg)
+    batch = _balanced_batch(gen, n_per_pid=180, shuffle_seed=949, return_aux=True)
+    pid_ids = batch["pid_id"].astype(np.int64)  # primary atom; used only for applicability split
+    X = _concat_raw(batch)
+    parts = _split_modalities_from_concat(X)
+
+    source_map = {"12": ("x1", "x2"), "13": ("x1", "x3"), "23": ("x2", "x3"), "123": ("x1", "x2", "x3")}
+    target_keys = {"1": "x1", "2": "x2", "3": "x3"}
+    rows: List[Dict[str, float]] = []
+    for src, src_keys in source_map.items():
+        query = _fused_query_from_parts(parts, src_keys)
+        for tgt, tgt_key in target_keys.items():
+            gallery = parts[tgt_key]
+            scores = _retrieval_scores(query, gallery)
+            rank = _retrieval_metrics_from_scores(scores)["rank"].astype(np.int64)  # type: ignore[index]
+            m_all = np.ones_like(pid_ids, dtype=bool)
+            if len(src) == 2 and tgt not in src:
+                m_app = np.isin(pid_ids, _applicable_pid_ids_for_pair_to_target(src, tgt))
+                m_non = ~m_app
+                split_masks = {"all": m_all, "applicable": m_app, "non_applicable": m_non}
+            else:
+                split_masks = {"all": m_all}
+            for split_name, mask in split_masks.items():
+                met = _retrieval_metrics_from_rank_subset(rank, mask)
+                rows.append(
+                    {
+                        "source": 0.0,
+                        "target": 0.0,
+                        "split": 0.0,
+                        "n": float(met["n"]),
+                        "recall_at_1": float(met["recall_at_1"]),
+                        "recall_at_5": float(met["recall_at_5"]),
+                        "mrr": float(met["mrr"]),
+                        "random_recall_at_1": float(1.0 / rank.shape[0]),
+                        "applicable_rate": float(np.mean(mask)),
+                    }
+                )
+                rows[-1]["source"] = src  # type: ignore[assignment]
+                rows[-1]["target"] = tgt  # type: ignore[assignment]
+                rows[-1]["split"] = split_name  # type: ignore[assignment]
+
+    with (out_dir / "compositional_easy_raw_retrieval_sanity.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "source",
+                "target",
+                "split",
+                "n",
+                "recall_at_1",
+                "recall_at_5",
+                "mrr",
+                "random_recall_at_1",
+                "applicable_rate",
+            ],
+        )
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(r)
+
+    # Hard-slice summary for the rotated pair->heldout tasks.
+    rot = [
+        r
+        for r in rows
+        if (str(r["source"]), str(r["target"])) in {("23", "1"), ("13", "2"), ("12", "3")} and str(r["split"]) == "all"
+    ]
+    mean_pair_heldout_r1 = float(np.mean([float(r["recall_at_1"]) for r in rot]))
+    random_r1 = float(rot[0]["random_recall_at_1"]) if rot else 0.0
+
+    fig, ax = plt.subplots(figsize=(8.2, 4.4))
+    order = [("12", "3"), ("13", "2"), ("23", "1"), ("123", "1"), ("123", "2"), ("123", "3")]
+    vals = []
+    labels = []
+    for s, t in order:
+        rr = [r for r in rows if str(r["source"]) == s and str(r["target"]) == t and str(r["split"]) == "all"]
+        vals.append(float(rr[0]["recall_at_1"]))
+        labels.append(f"{s}->{t}")
+    ax.bar(np.arange(len(vals)), vals, color="#4c78a8")
+    ax.axhline(random_r1, color="black", linestyle="--", linewidth=1.0, alpha=0.6, label="random R@1")
+    ax.set_xticks(np.arange(len(vals)))
+    ax.set_xticklabels(labels, rotation=25, ha="right")
+    ax.set_ylabel("Recall@1")
+    ax.set_title("Compositional-easy RAW retrieval sanity (exact instance)")
+    ax.grid(axis="y", alpha=0.25)
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    _savefig(out_dir / "compositional_easy_raw_retrieval_sanity.png")
+
+    # We only need a clear proof-of-solvability. Threshold is intentionally modest.
+    assert mean_pair_heldout_r1 > max(10.0 * random_r1, 0.01), (mean_pair_heldout_r1, random_r1)

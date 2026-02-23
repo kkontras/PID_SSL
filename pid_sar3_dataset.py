@@ -37,6 +37,12 @@ class PIDDatasetConfig:
     unique_gain: float = 1.0
     redundancy_gain: float = 1.0
     synergy_gain: float = 1.0
+    synergy_deleak_lambda: float = 1.0
+    composition_mode: str = "single_atom"  # "single_atom" | "multi_atom"
+    active_atoms_per_sample: int = 1
+    sample_active_atoms_without_replacement: bool = True
+    shared_backbone_gain: float = 0.0
+    shared_backbone_tied_projection: bool = False
     pid_gain_overrides: Optional[Dict[int, float]] = None
 
 
@@ -116,6 +122,7 @@ class PIDSar3DatasetGenerator:
             hidden_scale=self.cfg.synergy_hidden_scale,
         )
         self.C_a, self.C_b = self._fit_deleakage_maps()
+        self._shared_proj: Optional[Dict[int, np.ndarray]] = None
 
     def _sample_projections(self) -> Dict[int, Dict[str, np.ndarray]]:
         d, m = self.cfg.d, self.cfg.m
@@ -148,6 +155,29 @@ class PIDSar3DatasetGenerator:
     def _noise(self) -> np.ndarray:
         return self.rng.normal(0.0, self.cfg.sigma, size=(self.cfg.d,))
 
+    def _ensure_shared_proj(self) -> Dict[int, np.ndarray]:
+        # Separate RNG stream so legacy single-atom behavior remains unchanged.
+        if self._shared_proj is None:
+            d, m = self.cfg.d, self.cfg.m
+            shared_rng = np.random.default_rng(int(self.cfg.seed) + 100003)
+            self._shared_proj = {}
+            if bool(self.cfg.shared_backbone_tied_projection):
+                mat = shared_rng.normal(0.0, 1.0 / np.sqrt(d), size=(d, m))
+                col_norms = np.linalg.norm(mat, axis=0, keepdims=True) + 1e-8
+                mat_n = mat / col_norms
+                for view in (1, 2, 3):
+                    self._shared_proj[view] = mat_n.copy()
+            else:
+                for view in (1, 2, 3):
+                    mat = shared_rng.normal(0.0, 1.0 / np.sqrt(d), size=(d, m))
+                    col_norms = np.linalg.norm(mat, axis=0, keepdims=True) + 1e-8
+                    self._shared_proj[view] = mat / col_norms
+        return self._shared_proj
+
+    def _project_shared(self, view: int, latent: np.ndarray, gain: float) -> np.ndarray:
+        P_shared = self._ensure_shared_proj()
+        return gain * (P_shared[view] @ latent)
+
     def _sample_alpha(self) -> float:
         return float(self.rng.uniform(self.cfg.alpha_min, self.cfg.alpha_max))
 
@@ -169,45 +199,44 @@ class PIDSar3DatasetGenerator:
     def _project(self, view: int, comp: str, latent: np.ndarray, alpha: float) -> np.ndarray:
         return alpha * (self.P[view][comp] @ latent)
 
-    def sample(self, pid_id: Optional[int] = None, return_aux: bool = False) -> Dict[str, np.ndarray]:
-        if pid_id is None:
-            pid_id = int(self.rng.integers(0, 10))
+    @staticmethod
+    def _empty_aux_dict() -> Dict[str, np.ndarray]:
+        return {
+            "y_u1": np.float32(0.0),
+            "mask_y_u1": np.int64(0),
+            "y_u2": np.float32(0.0),
+            "mask_y_u2": np.int64(0),
+            "y_u3": np.float32(0.0),
+            "mask_y_u3": np.int64(0),
+            "y_r12": np.float32(0.0),
+            "mask_y_r12": np.int64(0),
+            "y_r13": np.float32(0.0),
+            "mask_y_r13": np.int64(0),
+            "y_r23": np.float32(0.0),
+            "mask_y_r23": np.int64(0),
+            "y_r123": np.float32(0.0),
+            "mask_y_r123": np.int64(0),
+            "y_s12_3": np.float32(0.0),
+            "mask_y_s12_3": np.int64(0),
+            "y_s13_2": np.float32(0.0),
+            "mask_y_s13_2": np.int64(0),
+            "y_s23_1": np.float32(0.0),
+            "mask_y_s23_1": np.int64(0),
+        }
 
+    def _sample_single_atom_clean(self, pid_id: int, return_aux: bool = False) -> Dict[str, np.ndarray]:
         if pid_id not in PID_ID_TO_NAME:
             raise ValueError(f"Invalid pid_id={pid_id}")
 
         alpha = self._sample_alpha() * self._atom_gain(pid_id)
-        sigma = float(self.cfg.sigma)
         rho = -1.0
         hop = 0
-
         x1 = np.zeros(self.cfg.d, dtype=np.float32)
         x2 = np.zeros(self.cfg.d, dtype=np.float32)
         x3 = np.zeros(self.cfg.d, dtype=np.float32)
         aux: Dict[str, np.ndarray] = {}
         if return_aux:
-            aux = {
-                "y_u1": np.float32(0.0),
-                "mask_y_u1": np.int64(0),
-                "y_u2": np.float32(0.0),
-                "mask_y_u2": np.int64(0),
-                "y_u3": np.float32(0.0),
-                "mask_y_u3": np.int64(0),
-                "y_r12": np.float32(0.0),
-                "mask_y_r12": np.int64(0),
-                "y_r13": np.float32(0.0),
-                "mask_y_r13": np.int64(0),
-                "y_r23": np.float32(0.0),
-                "mask_y_r23": np.int64(0),
-                "y_r123": np.float32(0.0),
-                "mask_y_r123": np.int64(0),
-                "y_s12_3": np.float32(0.0),
-                "mask_y_s12_3": np.int64(0),
-                "y_s13_2": np.float32(0.0),
-                "mask_y_s13_2": np.int64(0),
-                "y_s23_1": np.float32(0.0),
-                "mask_y_s23_1": np.int64(0),
-            }
+            aux = self._empty_aux_dict()
 
         name = PID_ID_TO_NAME[pid_id]
 
@@ -290,7 +319,8 @@ class PIDSar3DatasetGenerator:
             xi = self._project(source_i, comp_a, a, alpha)
             xj = self._project(source_j, comp_b, b, alpha)
             s0 = self.synergy_mlp(a, b, hop)
-            s = s0 - (a @ self.C_a[hop]) - (b @ self.C_b[hop])
+            deleak = (a @ self.C_a[hop]) + (b @ self.C_b[hop])
+            s = s0 - float(self.cfg.synergy_deleak_lambda) * deleak
             xk = self._project(target, syn_comp, s, alpha)
             if return_aux:
                 if pid_id == 7:
@@ -327,22 +357,99 @@ class PIDSar3DatasetGenerator:
         else:
             raise RuntimeError(f"Unhandled PID atom: {name}")
 
-        x1 = (x1 + self._noise()).astype(np.float32)
-        x2 = (x2 + self._noise()).astype(np.float32)
-        x3 = (x3 + self._noise()).astype(np.float32)
-
         out = {
             "x1": x1,
             "x2": x2,
             "x3": x3,
             "pid_id": np.int64(pid_id),
             "alpha": np.float32(alpha),
-            "sigma": np.float32(sigma),
+            "sigma": np.float32(self.cfg.sigma),
             "rho": np.float32(rho),
             "hop": np.int64(hop),
         }
         if return_aux:
             out.update(aux)
+        return out
+
+    def sample(self, pid_id: Optional[int] = None, return_aux: bool = False) -> Dict[str, np.ndarray]:
+        if pid_id is None:
+            pid_id = int(self.rng.integers(0, 10))
+
+        mode = str(self.cfg.composition_mode)
+        k = max(1, int(self.cfg.active_atoms_per_sample))
+        if mode == "single_atom" or k == 1:
+            out = self._sample_single_atom_clean(int(pid_id), return_aux=return_aux)
+            # Optional shared backbone can also be used in single-atom mode as an easier benchmark.
+            if float(self.cfg.shared_backbone_gain) > 0.0:
+                g = float(self.cfg.shared_backbone_gain) * self._sample_alpha()
+                z = self.rng.normal(size=(self.cfg.m,))
+                out["x1"] = (out["x1"] + self._project_shared(1, z, g)).astype(np.float32)
+                out["x2"] = (out["x2"] + self._project_shared(2, z, g)).astype(np.float32)
+                out["x3"] = (out["x3"] + self._project_shared(3, z, g)).astype(np.float32)
+            out["x1"] = (out["x1"] + self._noise()).astype(np.float32)
+            out["x2"] = (out["x2"] + self._noise()).astype(np.float32)
+            out["x3"] = (out["x3"] + self._noise()).astype(np.float32)
+            return out
+
+        if mode != "multi_atom":
+            raise ValueError(f"Unknown composition_mode={mode}")
+
+        atom_ids = [int(pid_id)]
+        need = k - 1
+        if need > 0:
+            all_ids = np.arange(10, dtype=np.int64)
+            if bool(self.cfg.sample_active_atoms_without_replacement):
+                candidates = all_ids[all_ids != int(pid_id)]
+                extra = self.rng.choice(candidates, size=min(need, candidates.size), replace=False).astype(np.int64).tolist()
+                atom_ids.extend([int(x) for x in extra])
+                while len(atom_ids) < k:
+                    atom_ids.append(int(self.rng.integers(0, 10)))
+            else:
+                atom_ids.extend([int(x) for x in self.rng.integers(0, 10, size=need)])
+
+        out = {
+            "x1": np.zeros(self.cfg.d, dtype=np.float32),
+            "x2": np.zeros(self.cfg.d, dtype=np.float32),
+            "x3": np.zeros(self.cfg.d, dtype=np.float32),
+            "pid_id": np.int64(int(pid_id)),  # primary atom kept for compatibility
+            "alpha": np.float32(0.0),
+            "sigma": np.float32(self.cfg.sigma),
+            "rho": np.float32(-1.0),
+            "hop": np.int64(0),
+        }
+        if return_aux:
+            out.update(self._empty_aux_dict())
+
+        first_meta = True
+        for atom in atom_ids:
+            atom_out = self._sample_single_atom_clean(int(atom), return_aux=return_aux)
+            out["x1"] = (out["x1"] + atom_out["x1"]).astype(np.float32)
+            out["x2"] = (out["x2"] + atom_out["x2"]).astype(np.float32)
+            out["x3"] = (out["x3"] + atom_out["x3"]).astype(np.float32)
+            if first_meta:
+                out["alpha"] = atom_out["alpha"]
+                out["rho"] = atom_out["rho"]
+                out["hop"] = atom_out["hop"]
+                first_meta = False
+            if return_aux:
+                for key in list(out.keys()):
+                    if key in ("x1", "x2", "x3", "pid_id", "alpha", "sigma", "rho", "hop"):
+                        continue
+                    if key.startswith("mask_"):
+                        out[key] = np.maximum(out[key], atom_out[key]).astype(out[key].dtype)
+                    else:
+                        out[key] = (out[key] + atom_out[key]).astype(out[key].dtype)
+
+        if float(self.cfg.shared_backbone_gain) > 0.0:
+            g = float(self.cfg.shared_backbone_gain) * self._sample_alpha()
+            z = self.rng.normal(size=(self.cfg.m,))
+            out["x1"] = (out["x1"] + self._project_shared(1, z, g)).astype(np.float32)
+            out["x2"] = (out["x2"] + self._project_shared(2, z, g)).astype(np.float32)
+            out["x3"] = (out["x3"] + self._project_shared(3, z, g)).astype(np.float32)
+
+        out["x1"] = (out["x1"] + self._noise()).astype(np.float32)
+        out["x2"] = (out["x2"] + self._noise()).astype(np.float32)
+        out["x3"] = (out["x3"] + self._noise()).astype(np.float32)
         return out
 
     def generate(

@@ -200,6 +200,32 @@ Main diagnosis:
 
 This supports the interpretation that the present pathology is a combination of dataset structure (single-atom samples, many inapplicable cases) and evaluation mismatch (exact instance retrieval with simple pair fusion), not just optimization failure.
 
-### 6.8 Summary
+### 6.8 Dataset Redesign Sanity (Compositional Easy Mode)
+
+To establish a benchmarkable starting point, we added a compositional dataset mode (multi-atom samples with summation) and an optional shared backbone term. The goal is not to define the final benchmark difficulty, but to first confirm that the retrieval task can be made solvable under the current exact-instance metric.
+
+In the current sanity configuration we use:
+
+- `composition_mode = multi_atom`
+- `active_atoms_per_sample = 4`
+- `shared_backbone_gain = 2.5`
+- `shared_backbone_tied_projection = True`
+- `sigma = 0.03`
+- `synergy_deleak_lambda = 0.5`
+
+Sanity artifacts:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/compositional_easy_raw_retrieval_sanity.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/compositional_easy_raw_retrieval_sanity.png`
+
+Under this configuration, **RAW exact-instance retrieval becomes clearly solvable** (no learned encoder; observations only):
+
+- random `Recall@1` is `1/1800 ≈ 0.00056`
+- rotated `pair->heldout` mean `Recall@1` is `0.429` (RAW)
+- `123->target` mean `Recall@1` is `0.919` (RAW)
+
+This gives a practical difficulty anchor: we now have a dataset regime where retrieval is not pathologically impossible, and we can progressively increase difficulty (reduce shared gain, untie shared projection, increase de-leakage, increase noise, reduce active atoms) while tracking where each objective breaks.
+
+### 6.9 Summary
 
 The results section is intentionally centered on one question: do frozen encoders support robust cross-modal transfer to a heldout modality? Under three different validations (chance-corrected prediction, retrieval, and reconstruction), the answer is currently no. The next iteration should target the `pair->heldout` slice directly in model selection and training.

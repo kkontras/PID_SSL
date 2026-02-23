@@ -534,7 +534,7 @@ Even after fixing the split, some methods still look closer than expected. Worki
 4. **Objectives have real tradeoffs**
    - Some improve class separation, others improve latent recoverability.
 
-### 6.7 Compact Hyperparameter Sensitivity Check (Reduced Sweep)
+### 6.7 Hyperparameter Sensitivity and Tuning (What Actually Matters)
 
 We ran a reduced-regime sweep (same-world split, smaller probe set, 120-step default) to test whether tuning matters.
 
@@ -546,6 +546,7 @@ Sweeps:
 - TRIANGLE temperature: `0.1, 0.2, 0.4`
 - ConFu fusion weight (`confu_fused_weight`): `0.25, 0.5, 0.75` with `confu_pair_weight = 1 - fused`
 - TRIANGLE training steps: `80, 240` (vs default `120`)
+- directional predictive hybrid: `directional_pred_weight ∈ {0.1, 0.25, 0.5, 1.0, 2.0}`, `temp ∈ {0.1,0.2,0.4}`, and `steps ∈ {80,240,400}` in a reduced sweep
 
 #### Table 6. Hyperparameter Sweep Highlights (Reduced Regime)
 
@@ -555,71 +556,110 @@ Sweeps:
 | TRIANGLE temp | `temp=0.2` | 0.673 | strong sensitivity; clear best in this sweep |
 | ConFu fusion weight | `fused=0.75` (PID/Family) | 0.542 | fused weight shifts classification vs latent-task tradeoff |
 | TRIANGLE steps | `steps=240` | 0.705 | longer training improves TRIANGLE substantially |
+| directional hybrid weight | `directional_pred_weight=0.1` (PID) / `2.0` (synergy target) | 0.544 / `R²(y_s12_3)=-0.231` | strong tradeoff between classification and directional target recoverability |
+| directional hybrid steps | `steps=400` (in sweep) | 0.592 | training budget helps classification, but latent probes can move non-monotonically |
 
 Main tuning conclusions:
 
 - **Yes, hyperparameters matter and should be tuned per method.**
 - **TRIANGLE is especially sensitive to temperature and training budget.**
 - **ConFu-style is sensitive to pair-vs-fused weighting**, and different settings favor different targets.
+- **Directional predictive hybrid is sensitive to `directional_pred_weight`**: larger weight helps `y_s12_3` recoverability but can hurt PID-10 classification.
 - A single shared hyperparameter point is not sufficient for a fair comparison.
+- The reduced sweep is useful for direction finding, but **final method ranking should use a longer run with explicit tuning selection**.
 
-### 6.8 Longer-Training Check (600 Steps, Same-World Split, Including Directional Predictive Hybrid)
+Additional directional sweep artifact:
 
-To test whether the methods were still in an early optimization regime, we ran a longer comparison (`600` steps) under the same corrected split protocol and added a directional predictive hybrid model:
+- `test_outputs/pid_sar3_ssl_fused_confusions/directional_predictive_hparam_sweep_compact.csv`
 
-- `E`: pairwise contrastive + directional predictors `([h_i,h_j] -> h_k)`
+### 6.8 Tuned Long-Run Comparison (600 Steps, Same-World Split, Validation-Selected Hyperparameters)
 
-Artifacts:
+This is now the main SSL comparison result.
 
-- `test_outputs/pid_sar3_ssl_fused_confusions/long_steps_600_four_models_task_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/long_steps_600_four_models_geometry_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/long_steps_600_four_models_redundancy_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/pid10_confusions_fused_frozen_four_models_steps600.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/geometry_pid_summary_four_models_steps600.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/long_steps_600_directional_predictive_task_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/long_steps_600_directional_predictive_geometry_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/long_steps_600_directional_predictive_redundancy_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/pid10_confusion_directional_predictive_steps600.png`
+We ran a focused **600-step long-run sweep** for all five methods, using the corrected same-world split and an explicit probe validation split:
 
-#### Table 7. Long-Training (600-Step) Summary (5 Models)
+- `probe_train`: fit linear probes
+- `probe_val`: select hyperparameters (selection metric: validation `PID-10`)
+- `probe_test`: final report (held-out)
 
-| Model | PID-10 | Family-3 | `R²(y_u1)` | `R²(y_r12)` | `R²(y_r123)` | `R²(y_s12_3)` |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.637 | 0.613 | 0.659 | 0.325 | 0.396 | -0.389 |
-| B: pairwise InfoNCE | 0.691 | 0.631 | 0.373 | 0.158 | 0.285 | -0.355 |
-| C: TRIANGLE (area contrastive) | 0.786 | 0.734 | 0.332 | 0.050 | 0.255 | -0.301 |
-| D: ConFu-style (fusion-head) | 0.677 | 0.670 | 0.370 | -0.043 | 0.254 | -0.362 |
-| E: directional predictive hybrid | 0.692 | 0.622 | 0.411 | 0.214 | 0.218 | -0.263 |
+Methods:
 
-#### Table 8. Long-Training Redundancy / Geometry Snapshot
+1. `A`: 3x unimodal SimCLR
+2. `B`: pairwise InfoNCE
+3. `C`: TRIANGLE exact (area contrastive)
+4. `D`: ConFu-style (fusion-head)
+5. `E`: directional predictive hybrid (`[h_i,h_j] -> h_k`)
 
-| Model | `R` avg recall | `R -> S` leakage | mean matched `R/S` centroid cosine | mean matched `R/S` NC acc |
-| --- | ---: | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.619 | 0.180 | 0.640 | 0.602 |
-| B: pairwise InfoNCE | 0.705 | 0.152 | 0.959 | 0.583 |
-| C: TRIANGLE (area contrastive) | 0.753 | 0.202 | 0.967 | 0.627 |
-| D: ConFu-style (fusion-head) | 0.645 | 0.238 | 0.976 | 0.592 |
-| E: directional predictive hybrid | 0.698 | 0.183 | 0.979 | 0.607 |
+Primary tuned artifacts:
 
-What this clarifies:
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_model_selection.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_selected_hparams.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_task_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_geometry_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_redundancy_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/pid10_confusions_fused_frozen_five_models_tuned_steps600.png`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_summary.png`
 
-- **Methods do separate when trained longer.** The short-regime similarity was partly an optimization-budget issue.
-- **TRIANGLE** becomes the strongest classifier by a clear margin at 600 steps.
-- **Pairwise InfoNCE** improves substantially with training and becomes stronger than unimodal SimCLR on `PID-10` and redundancy recall.
-- **ConFu-style (fusion-head)** remains competitive but does not dominate in this setting; it still looks more specialized than universally better.
-- **Directional predictive hybrid (E)** is competitive on classification (`PID-10 ≈ pairwise InfoNCE`) and gives the best long-run `R²(y_s12_3)` among the five (`-0.263`, least negative), which is a meaningful directional-synergy signal improvement.
-- However, **E does not solve the geometry pathology**: matched `R/S` centroid overlap remains very high (`0.979`), so directional prediction improves target recoverability more than global class separation geometry.
-- The `Rij <-> Sij->k` pathology does not disappear, but the ranking among methods is now much clearer.
+![PID-10 confusions, tuned 5-model comparison](test_outputs/pid_sar3_ssl_fused_confusions/pid10_confusions_fused_frozen_five_models_tuned_steps600.png)
 
-This supports the hypothesis in Section 6.6 that training budget was masking objective differences.
+*Figure 12. Tuned 600-step PID-10 confusion matrices. Hyperparameters are selected per method on validation `PID-10`, then reported on held-out test.*
 
-### 6.9 What To Do Next (Most Likely to Separate Methods)
+![Tuned 600-step compact summary](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_summary.png)
 
-1. Tune the **directional predictive hybrid** (`directional_pred_weight`, temperature, steps) and test whether it can reduce `Rij <-> Sij->k` confusion without sacrificing the improved `y_s12_3` recoverability.
-2. Tune each method separately (`temperature`, `steps`, ConFu weights) before final ranking.
-3. Evaluate both `h` and `z` (encoder vs projector outputs).
-4. Add regime-stratified evaluation (`rho`, `sigma`, `hop`).
-5. Add a formal `R-only` benchmark mode (high `rho`, lower `sigma`) as a shared-information sanity stage.
+*Figure 13. Tuned 600-step summary emphasizing `PID-10`, redundancy recall, `Rij/Sij->k` centroid overlap, and `R²(y_s12_3)`.*
+
+#### Table 7. Tuned 600-Step Results (Selection on Validation `PID-10`, Report on Held-Out Test)
+
+Sources:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_task_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_geometry_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_redundancy_summary.csv`
+
+| Model | Selected hparams | PID-10 | Family-3 | `R` avg recall | mean matched `R/S` centroid cosine | mean matched `R/S` NC acc | `R²(y_s12_3)` |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| A: 3x unimodal SimCLR | `temp=0.4` | 0.658 | 0.617 | 0.647 | 0.768 | 0.553 | **-0.069** |
+| B: pairwise InfoNCE | `temp=0.4` | 0.685 | 0.632 | 0.677 | 0.986 | 0.552 | -0.308 |
+| C: TRIANGLE exact | `temp=0.1` | **0.807** | **0.749** | **0.784** | 0.978 | **0.652** | -0.381 |
+| D: ConFu fusion-head | `temp=0.2`, pair/fused=`0.5/0.5` | 0.712 | 0.649 | 0.719 | 0.988 | 0.565 | -0.265 |
+| E: directional predictive hybrid | `temp=0.2`, `directional_pred_weight=0.1` | 0.681 | 0.616 | 0.672 | 0.984 | 0.582 | -0.447 |
+
+What this clarifies (and fixes in the earlier interpretation):
+
+- **Tuning matters enough to change rankings within methods** (e.g., `A` and `B` prefer `temp=0.4`, TRIANGLE prefers `temp=0.1`).
+- **TRIANGLE exact is the clearest winner on class separation and redundancy classification** in this benchmark configuration.
+- **ConFu fusion-head improves substantially after tuning** and becomes a strong second-tier method on `PID-10` / `R` recall (ahead of untuned ConFu by a wide margin).
+- **Pairwise InfoNCE** improves strongly with tuning and long training, outperforming unimodal SimCLR on `PID-10` and `R` recall.
+- **Directional predictive hybrid** did not win under validation-`PID-10` tuning; in this sweep it preferred a **small** directional weight (`0.1`), which indicates the directional term can hurt classification when over-weighted.
+- The **`Rij <-> Sij->k` geometry pathology remains** for all higher-order/cross-modal methods (high matched `R/S` centroid overlap), even when classification improves.
+
+Important nuance:
+
+- In this run, **unimodal SimCLR has the best `R²(y_s12_3)`** (least negative), which means the directional hybrid does not dominate directional-latent recoverability when tuning is done for classification. This is exactly why the tuning target must be stated explicitly.
+
+#### Table 8. Selected Hyperparameters (Validation-Selected)
+
+Source: `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_selected_hparams.csv`
+
+| Model | Selected setting |
+| --- | --- |
+| A: 3x unimodal SimCLR | `temp=0.4`, `steps=600` |
+| B: pairwise InfoNCE | `temp=0.4`, `steps=600` |
+| C: TRIANGLE exact | `temp=0.1`, `steps=600` |
+| D: ConFu fusion-head | `temp=0.2`, `confu_pair_weight=0.5`, `confu_fused_weight=0.5`, `steps=600` |
+| E: directional predictive hybrid | `temp=0.2`, `directional_pred_weight=0.1`, `steps=600` |
+
+Supporting note:
+
+- We keep the earlier untuned long-run artifacts (`long_steps_600_*`) as a useful baseline for showing why tuning changes conclusions, but the tuned validation-selected comparison above is the one to use for primary claims.
+
+### 6.9 What To Do Next (Now That Tuning Is In Place)
+
+1. Add a **directional-hybrid tuning track selected on a directional metric** (e.g., validation `R²(y_s12_3)` or synergy-only recall) and compare against the classification-selected version to make the tradeoff explicit.
+2. Evaluate both `h` and `z` (encoder vs projector outputs) for all tuned models.
+3. Add regime-stratified evaluation (`rho`, `sigma`, `hop`) to test whether TRIANGLE/ConFu gains are strongest in specific regimes.
+4. Add a formal `R-only` benchmark mode (high `rho`, lower `sigma`) as a shared-information sanity stage.
+5. Add a `S-only` directional benchmark stage to test the predictive head under the metric it is meant to optimize.
 
 ### 6.10 Reproducing the SSL Comparisons
 

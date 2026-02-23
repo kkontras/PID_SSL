@@ -1,0 +1,6 @@
+model,r_avg_recall,r_exact_acc,r_any_r,r_to_s_leak,r_to_u_leak
+A_unimodal_simclr,0.646875,0.646875,0.721875,0.1703125,0.1078125
+B_pairwise_infonce,0.6765625,0.6765625,0.7140625,0.16875,0.1171875
+C_triangle_exact,0.784375,0.784375,0.7921875,0.16875,0.0390625
+D_confu_fusion_head,0.71875,0.71875,0.7484375,0.171875,0.0796875
+E_directional_predictive_hybrid,0.671875,0.671875,0.7125,0.16875,0.11875

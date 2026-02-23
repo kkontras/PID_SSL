@@ -1,0 +1,6 @@
+model,temp,steps,confu_pair_weight,confu_fused_weight,directional_pred_weight,selection_metric,selection_val_pid10
+A_unimodal_simclr,0.4,600.0,0.5,0.5,0.5,val_pid10,0.6266666650772095
+B_pairwise_infonce,0.4,600.0,0.5,0.5,0.5,val_pid10,0.6616666913032532
+C_triangle_exact,0.1,600.0,0.5,0.5,0.5,val_pid10,0.7866666913032532
+D_confu_fusion_head,0.2,600.0,0.5,0.5,0.5,val_pid10,0.699999988079071
+E_directional_predictive_hybrid,0.2,600.0,0.5,0.5,0.1,val_pid10,0.6733333468437195

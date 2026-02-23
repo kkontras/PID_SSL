@@ -75,11 +75,11 @@ This ladder is the correct starting point for the next model reruns: it lets us 
 
 After establishing the ladder, we reran the main downstream analyses on `L0 = compositional_very_easy` to verify that the objectives separate in a benchmarkable regime.
 
-This rerun is a compact pass (CPU-friendly) intended to update the qualitative conclusions quickly:
+This rerun is a heavier pass (GPU-assisted SSL training) intended to strengthen the `L0` calibration results:
 
-- SSL training: `120` steps
-- probe set: `40` samples per primary PID label (`n=400`)
-- kappa and reconstruction: `2` folds
+- SSL training: `480` steps on GPU
+- probe set: `100` samples per primary PID label (`n=1000`)
+- kappa and reconstruction: `5` folds
 - kappa evaluation restricted to source subsets `{12,13,23,123}` (the post-6.3 task focus)
 
 Artifacts:
@@ -90,34 +90,34 @@ Artifacts:
 - `test_outputs/pid_sar3_ssl_fused_confusions/compositional_very_easy_source_to_target_reconstruction_four_models_5fold_summary.csv`
 - `test_outputs/pid_sar3_ssl_fused_confusions/compositional_very_easy_source_to_target_reconstruction_four_models_5fold_grouped_summary.csv`
 
-#### 6.4.1 Source->Target Prediction (Cohen's \(\kappa\), compositional `L0` quick rerun)
+#### 6.4.1 Source->Target Prediction (Cohen's \(\kappa\), compositional `L0`)
 
 For the source->target benchmark, we predict thresholded raw target coordinates and report macro Cohen's kappa,
 \[
 \bar{\kappa}=\frac{1}{D}\sum_{d=1}^{D}\kappa_d, \qquad \kappa=\frac{p_o-p_e}{1-p_e}.
 \]
 
-##### Table 7a. Grouped Summary (compositional `L0`, macro-\(\kappa\))
+##### Table 7a. Grouped Summary (compositional `L0`, macro-\(\kappa\), 5-fold)
 
 | Model | pair->heldout target | pair->member target | `123->target` |
 | --- | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.631 | 0.709 | 0.701 |
-| B: pairwise InfoNCE | 0.639 | 0.682 | 0.674 |
-| C: TRIANGLE | 0.624 | 0.676 | 0.669 |
-| D: ConFu | 0.623 | 0.669 | 0.663 |
+| A: 3x unimodal SimCLR | 0.674 | 0.757 | 0.752 |
+| B: pairwise InfoNCE | 0.671 | 0.717 | 0.715 |
+| C: TRIANGLE | 0.666 | 0.719 | 0.721 |
+| D: ConFu | 0.651 | 0.693 | 0.694 |
 
 In `L0`, the benchmark is solvable and chance-corrected performance is high across all three groups, which is the intended behavior of a calibration regime.
 
-##### Table 7. Rotated Pair->Heldout Targets (compositional `L0`, macro-\(\kappa\), 2-fold mean \(\pm\) SE)
+##### Table 7. Rotated Pair->Heldout Targets (compositional `L0`, macro-\(\kappa\), 5-fold mean \(\pm\) SE)
 
 | Model | `23->1` \(\kappa\) | `13->2` \(\kappa\) | `12->3` \(\kappa\) |
 | --- | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.623 ± 0.001 | 0.634 ± 0.001 | 0.636 ± 0.011 |
-| B: pairwise InfoNCE | 0.637 ± 0.008 | 0.642 ± 0.002 | 0.639 ± 0.011 |
-| C: TRIANGLE | 0.620 ± 0.004 | 0.629 ± 0.001 | 0.624 ± 0.009 |
-| D: ConFu | 0.615 ± 0.002 | 0.627 ± 0.004 | 0.628 ± 0.010 |
+| A: 3x unimodal SimCLR | 0.669 ± 0.001 | 0.673 ± 0.003 | 0.679 ± 0.005 |
+| B: pairwise InfoNCE | 0.670 ± 0.003 | 0.668 ± 0.004 | 0.677 ± 0.004 |
+| C: TRIANGLE | 0.652 ± 0.003 | 0.667 ± 0.002 | 0.680 ± 0.002 |
+| D: ConFu | 0.641 ± 0.006 | 0.650 ± 0.003 | 0.662 ± 0.004 |
 
-##### Table 7b. Pair/Triple Source->Target Matrix (compositional `L0`, macro-\(\kappa\), 2-fold means)
+##### Table 7b. Pair/Triple Source->Target Matrix (compositional `L0`, macro-\(\kappa\), 5-fold means)
 
 Cell colors use a fixed threshold at \(\kappa=0.25\): green for \(\kappa>0.25\), red for \(\kappa\le 0.25\).
 
@@ -132,18 +132,18 @@ Cell colors use a fixed threshold at \(\kappa=0.25\): green for \(\kappa>0.25\),
     </tr>
   </thead>
   <tbody>
-    <tr><td><code>12->1</code></td><td align="right" style="background:#d9f2d9;">0.710</td><td align="right" style="background:#d9f2d9;">0.687</td><td align="right" style="background:#d9f2d9;">0.693</td><td align="right" style="background:#d9f2d9;">0.663</td></tr>
-    <tr><td><code>12->2</code></td><td align="right" style="background:#d9f2d9;">0.708</td><td align="right" style="background:#d9f2d9;">0.680</td><td align="right" style="background:#d9f2d9;">0.668</td><td align="right" style="background:#d9f2d9;">0.674</td></tr>
-    <tr><td><code>12->3</code></td><td align="right" style="background:#d9f2d9;">0.636</td><td align="right" style="background:#d9f2d9;">0.639</td><td align="right" style="background:#d9f2d9;">0.624</td><td align="right" style="background:#d9f2d9;">0.628</td></tr>
-    <tr><td><code>13->1</code></td><td align="right" style="background:#d9f2d9;">0.706</td><td align="right" style="background:#d9f2d9;">0.683</td><td align="right" style="background:#d9f2d9;">0.683</td><td align="right" style="background:#d9f2d9;">0.669</td></tr>
-    <tr><td><code>13->2</code></td><td align="right" style="background:#d9f2d9;">0.634</td><td align="right" style="background:#d9f2d9;">0.642</td><td align="right" style="background:#d9f2d9;">0.629</td><td align="right" style="background:#d9f2d9;">0.627</td></tr>
-    <tr><td><code>13->3</code></td><td align="right" style="background:#d9f2d9;">0.710</td><td align="right" style="background:#d9f2d9;">0.684</td><td align="right" style="background:#d9f2d9;">0.670</td><td align="right" style="background:#d9f2d9;">0.667</td></tr>
-    <tr><td><code>23->1</code></td><td align="right" style="background:#d9f2d9;">0.623</td><td align="right" style="background:#d9f2d9;">0.637</td><td align="right" style="background:#d9f2d9;">0.620</td><td align="right" style="background:#d9f2d9;">0.615</td></tr>
-    <tr><td><code>23->2</code></td><td align="right" style="background:#d9f2d9;">0.712</td><td align="right" style="background:#d9f2d9;">0.681</td><td align="right" style="background:#d9f2d9;">0.671</td><td align="right" style="background:#d9f2d9;">0.679</td></tr>
-    <tr><td><code>23->3</code></td><td align="right" style="background:#d9f2d9;">0.710</td><td align="right" style="background:#d9f2d9;">0.678</td><td align="right" style="background:#d9f2d9;">0.670</td><td align="right" style="background:#d9f2d9;">0.665</td></tr>
-    <tr><td><code>123->1</code></td><td align="right" style="background:#d9f2d9;">0.697</td><td align="right" style="background:#d9f2d9;">0.674</td><td align="right" style="background:#d9f2d9;">0.677</td><td align="right" style="background:#d9f2d9;">0.662</td></tr>
-    <tr><td><code>123->2</code></td><td align="right" style="background:#d9f2d9;">0.701</td><td align="right" style="background:#d9f2d9;">0.675</td><td align="right" style="background:#d9f2d9;">0.663</td><td align="right" style="background:#d9f2d9;">0.665</td></tr>
-    <tr><td><code>123->3</code></td><td align="right" style="background:#d9f2d9;">0.706</td><td align="right" style="background:#d9f2d9;">0.673</td><td align="right" style="background:#d9f2d9;">0.667</td><td align="right" style="background:#d9f2d9;">0.664</td></tr>
+    <tr><td><code>12->1</code></td><td align="right" style="background:#d9f2d9;">0.755</td><td align="right" style="background:#d9f2d9;">0.711</td><td align="right" style="background:#d9f2d9;">0.735</td><td align="right" style="background:#d9f2d9;">0.689</td></tr>
+    <tr><td><code>12->2</code></td><td align="right" style="background:#d9f2d9;">0.753</td><td align="right" style="background:#d9f2d9;">0.715</td><td align="right" style="background:#d9f2d9;">0.718</td><td align="right" style="background:#d9f2d9;">0.701</td></tr>
+    <tr><td><code>12->3</code></td><td align="right" style="background:#d9f2d9;">0.679</td><td align="right" style="background:#d9f2d9;">0.677</td><td align="right" style="background:#d9f2d9;">0.680</td><td align="right" style="background:#d9f2d9;">0.662</td></tr>
+    <tr><td><code>13->1</code></td><td align="right" style="background:#d9f2d9;">0.749</td><td align="right" style="background:#d9f2d9;">0.713</td><td align="right" style="background:#d9f2d9;">0.730</td><td align="right" style="background:#d9f2d9;">0.680</td></tr>
+    <tr><td><code>13->2</code></td><td align="right" style="background:#d9f2d9;">0.673</td><td align="right" style="background:#d9f2d9;">0.668</td><td align="right" style="background:#d9f2d9;">0.667</td><td align="right" style="background:#d9f2d9;">0.650</td></tr>
+    <tr><td><code>13->3</code></td><td align="right" style="background:#d9f2d9;">0.763</td><td align="right" style="background:#d9f2d9;">0.723</td><td align="right" style="background:#d9f2d9;">0.721</td><td align="right" style="background:#d9f2d9;">0.698</td></tr>
+    <tr><td><code>23->1</code></td><td align="right" style="background:#d9f2d9;">0.669</td><td align="right" style="background:#d9f2d9;">0.670</td><td align="right" style="background:#d9f2d9;">0.652</td><td align="right" style="background:#d9f2d9;">0.641</td></tr>
+    <tr><td><code>23->2</code></td><td align="right" style="background:#d9f2d9;">0.754</td><td align="right" style="background:#d9f2d9;">0.717</td><td align="right" style="background:#d9f2d9;">0.700</td><td align="right" style="background:#d9f2d9;">0.691</td></tr>
+    <tr><td><code>23->3</code></td><td align="right" style="background:#d9f2d9;">0.765</td><td align="right" style="background:#d9f2d9;">0.724</td><td align="right" style="background:#d9f2d9;">0.712</td><td align="right" style="background:#d9f2d9;">0.696</td></tr>
+    <tr><td><code>123->1</code></td><td align="right" style="background:#d9f2d9;">0.745</td><td align="right" style="background:#d9f2d9;">0.710</td><td align="right" style="background:#d9f2d9;">0.730</td><td align="right" style="background:#d9f2d9;">0.687</td></tr>
+    <tr><td><code>123->2</code></td><td align="right" style="background:#d9f2d9;">0.748</td><td align="right" style="background:#d9f2d9;">0.716</td><td align="right" style="background:#d9f2d9;">0.712</td><td align="right" style="background:#d9f2d9;">0.696</td></tr>
+    <tr><td><code>123->3</code></td><td align="right" style="background:#d9f2d9;">0.762</td><td align="right" style="background:#d9f2d9;">0.718</td><td align="right" style="background:#d9f2d9;">0.721</td><td align="right" style="background:#d9f2d9;">0.700</td></tr>
   </tbody>
 </table>
 
@@ -155,14 +155,14 @@ Retrieval in `L0` is a much stronger diagnostic than in the strict single-atom r
 
 | Model | pair->heldout `R@1` | pair->member `R@1` | `123->target` `R@1` |
 | --- | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.2700 | 0.8575 | 0.7025 |
-| B: pairwise InfoNCE | 0.0025 | 0.5629 | 0.3092 |
-| C: TRIANGLE | 0.0017 | 0.2450 | 0.1483 |
-| D: ConFu | 0.0025 | 0.5513 | 0.2892 |
+| A: 3x unimodal SimCLR | 0.1437 | 0.7540 | 0.6223 |
+| B: pairwise InfoNCE | 0.0013 | 0.5360 | 0.2470 |
+| C: TRIANGLE | 0.0000 | 0.1692 | 0.1060 |
+| D: ConFu | 0.0003 | 0.5303 | 0.2413 |
 
 This reveals a strong separation in the current `L0` setting: unimodal SimCLR dominates exact retrieval, while the contrastive fusion variants lag substantially on this metric.
 
-#### 6.4.3 Frozen-Decoder Reconstruction (compositional `L0`, 2-fold)
+#### 6.4.3 Frozen-Decoder Reconstruction (compositional `L0`, 5-fold)
 
 We retain the same reconstruction benchmark definition and report macro \(R^2\), where positive values indicate better-than-baseline reconstruction and higher is better.
 
@@ -170,27 +170,27 @@ Grouped summary (macro \(R^2\)):
 
 | Decoder | Model | pair->heldout target | pair->member target | `123->target` |
 | --- | --- | ---: | ---: | ---: |
-| Ridge | A: 3x unimodal SimCLR | 0.698 | 0.833 | 0.817 |
-| Ridge | B: pairwise InfoNCE | 0.697 | 0.798 | 0.777 |
-| Ridge | C: TRIANGLE | 0.692 | 0.793 | 0.782 |
-| Ridge | D: ConFu | 0.692 | 0.791 | 0.777 |
-| MLP | A: 3x unimodal SimCLR | 0.632 | 0.690 | 0.677 |
-| MLP | B: pairwise InfoNCE | 0.632 | 0.662 | 0.653 |
-| MLP | C: TRIANGLE | 0.619 | 0.654 | 0.638 |
-| MLP | D: ConFu | 0.612 | 0.641 | 0.634 |
+| Ridge | A: 3x unimodal SimCLR | 0.768 | 0.874 | 0.877 |
+| Ridge | B: pairwise InfoNCE | 0.769 | 0.833 | 0.836 |
+| Ridge | C: TRIANGLE | 0.759 | 0.837 | 0.845 |
+| Ridge | D: ConFu | 0.741 | 0.804 | 0.812 |
+| MLP | A: 3x unimodal SimCLR | 0.742 | 0.822 | 0.822 |
+| MLP | B: pairwise InfoNCE | 0.736 | 0.769 | 0.772 |
+| MLP | C: TRIANGLE | 0.720 | 0.758 | 0.766 |
+| MLP | D: ConFu | 0.697 | 0.725 | 0.732 |
 
-Rotated `pair->heldout` slice (macro \(R^2\), 2-fold mean \(\pm\) SE):
+Rotated `pair->heldout` slice (macro \(R^2\), 5-fold mean \(\pm\) SE):
 
 | Decoder | Model | `23->1` | `13->2` | `12->3` |
 | --- | --- | ---: | ---: | ---: |
-| Ridge | A: 3x unimodal SimCLR | 0.700 ± 0.008 | 0.696 ± 0.004 | 0.698 ± 0.000 |
-| Ridge | B: pairwise InfoNCE | 0.690 ± 0.001 | 0.701 ± 0.010 | 0.701 ± 0.003 |
-| Ridge | C: TRIANGLE | 0.687 ± 0.004 | 0.700 ± 0.009 | 0.689 ± 0.001 |
-| Ridge | D: ConFu | 0.689 ± 0.000 | 0.693 ± 0.001 | 0.695 ± 0.001 |
-| MLP | A: 3x unimodal SimCLR | 0.628 ± 0.008 | 0.632 ± 0.002 | 0.635 ± 0.002 |
-| MLP | B: pairwise InfoNCE | 0.628 ± 0.002 | 0.632 ± 0.008 | 0.636 ± 0.000 |
-| MLP | C: TRIANGLE | 0.623 ± 0.004 | 0.618 ± 0.009 | 0.617 ± 0.003 |
-| MLP | D: ConFu | 0.609 ± 0.001 | 0.614 ± 0.014 | 0.612 ± 0.001 |
+| Ridge | A: 3x unimodal SimCLR | 0.767 ± 0.001 | 0.766 ± 0.003 | 0.769 ± 0.002 |
+| Ridge | B: pairwise InfoNCE | 0.768 ± 0.002 | 0.765 ± 0.002 | 0.773 ± 0.003 |
+| Ridge | C: TRIANGLE | 0.748 ± 0.002 | 0.760 ± 0.002 | 0.767 ± 0.003 |
+| Ridge | D: ConFu | 0.734 ± 0.003 | 0.737 ± 0.003 | 0.751 ± 0.002 |
+| MLP | A: 3x unimodal SimCLR | 0.742 ± 0.001 | 0.739 ± 0.004 | 0.746 ± 0.002 |
+| MLP | B: pairwise InfoNCE | 0.732 ± 0.001 | 0.733 ± 0.002 | 0.742 ± 0.003 |
+| MLP | C: TRIANGLE | 0.702 ± 0.003 | 0.723 ± 0.001 | 0.734 ± 0.004 |
+| MLP | D: ConFu | 0.694 ± 0.004 | 0.692 ± 0.002 | 0.704 ± 0.005 |
 
 In `L0`, reconstruction is uniformly strong and no longer dominated by near-chance behavior. This confirms that the new compositional regime is suitable for objective comparison.
 

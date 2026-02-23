@@ -600,3 +600,81 @@ test_plot_unimodal_simclr_pid_term_validation()
 print("Saved unimodal SimCLR outputs under test_outputs/pid_sar3_ssl_unimodal")
 PY
 ```
+
+### 7.7 Fused Frozen-Encoder Validation (All Modalities Together, Linear Probes)
+
+To match the intended downstream use more closely, we also evaluate the unimodal SimCLR encoders **jointly**:
+
+- train three unimodal SimCLR encoders (`x1`, `x2`, `x3`) independently
+- freeze them
+- concatenate the frozen representations `[h1,h2,h3]`
+- train linear supervised probes on the concatenated representation
+
+This section answers: *if we use all modalities at validation time, how good is the learned representation on the supervised tasks?*
+
+Implementation entry point:
+
+- `tests/test_pid_sar3_unimodal_simclr_fused_validation.py`
+
+#### Validation Tasks (All on Held-Out Data)
+
+- `PID-10` multiclass classification (`pid_id`)
+- `Family-3` classification (`Unique / Redundancy / Synergy`)
+- linear regression probes for latent-derived targets:
+  - `y_u1`
+  - `y_r12`
+  - `y_r123`
+  - `y_s12_3`
+
+The latent-target probes are evaluated on the appropriate masked subsets only (active samples for that target).
+
+#### Fused Validation Figures
+
+![Unimodal SimCLR fused training losses](test_outputs/pid_sar3_ssl_unimodal_fused/unimodal_simclr_fused_training_losses.png)
+
+*Figure 16. Unimodal SimCLR pretraining losses used for the frozen-fusion validation run.* This is a separate run from Figures 11-15 but uses the same setup style.
+
+![Fused supervised tasks summary](test_outputs/pid_sar3_ssl_unimodal_fused/unimodal_simclr_fused_supervised_tasks_summary.png)
+
+*Figure 17. All supervised tasks with frozen unimodal SimCLR encoders, using concatenated modalities (`[h1,h2,h3]`) and linear probes.* This is the requested "all modalities together" validation view.
+
+![Fused supervised task gains](test_outputs/pid_sar3_ssl_unimodal_fused/unimodal_simclr_fused_supervised_task_gains.png)
+
+*Figure 18. Task-wise gain of fused frozen SimCLR features over a raw-concatenation baseline (`[x1,x2,x3]`).* Gains are positive for classification in this run and negative for the latent linear regression probes.
+
+#### Table 5. Fused Frozen-Encoder Supervised Validation (from `test_outputs/pid_sar3_ssl_unimodal_fused/unimodal_simclr_fused_supervised_summary.csv`)
+
+| Task | Raw concat + linear probe | Frozen SimCLR fusion + linear probe | Gain |
+| --- | ---: | ---: | ---: |
+| `PID-10` accuracy | 0.095 | 0.371 | +0.276 |
+| `Family-3` accuracy | 0.370 | 0.446 | +0.076 |
+| `R²(y_u1)` | -0.329 | -0.372 | -0.043 |
+| `R²(y_r12)` | -0.100 | -0.473 | -0.373 |
+| `R²(y_r123)` | -0.759 | -0.909 | -0.151 |
+| `R²(y_s12_3)` | -1.488 | -1.867 | -0.379 |
+
+#### Interpretation (Important)
+
+This result is actually useful:
+
+- The fused frozen SimCLR representation substantially improves **PID-term classification** (`PID-10`, `Family-3`).
+- But under this short unimodal pretraining regime, it **does not preserve the latent-derived scalar targets linearly** (negative `R²`, often worse than raw).
+
+This is a strong signal that the current unimodal SimCLR setup is learning discriminative invariants for class separation, but not a linearly decodable representation of the latent factors we care about (`U/R/S` latent coordinates).
+
+That makes the validation suite better, not worse: it separates two notions of "good":
+
+- good for PID-term classification
+- good for latent-factor recoverability (PID-sensitive linear structure)
+
+Both should be tracked going forward.
+
+#### Reproducing the Fused Validation
+
+```bash
+python - <<'PY'
+from tests.test_pid_sar3_unimodal_simclr_fused_validation import test_plot_unimodal_simclr_frozen_fusion_supervised_validation
+test_plot_unimodal_simclr_frozen_fusion_supervised_validation()
+print("Saved fused unimodal SimCLR validation outputs under test_outputs/pid_sar3_ssl_unimodal_fused")
+PY
+```

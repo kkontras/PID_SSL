@@ -572,15 +572,33 @@ Additional directional sweep artifact:
 
 - `test_outputs/pid_sar3_ssl_fused_confusions/directional_predictive_hparam_sweep_compact.csv`
 
-### 6.8 Tuned Long-Run Comparison (600 Steps, Same-World Split, Validation-Selected Hyperparameters)
+### 6.8 Tuned Long-Run Downstream Proxy Benchmark (600 Steps, Frozen Encoders, `x123` Main Evaluation)
 
-This is now the main SSL comparison result.
+This is now the primary SSL benchmark result.
 
-We ran a focused **600-step long-run sweep** for all five methods, using the corrected same-world split and an explicit probe validation split:
+Instead of predicting the `PID-10` term label, we evaluate pretrained encoders by frozen-feature downstream regression on the latent proxy targets `y_*`. These are the intended PID-information probes.
 
-- `probe_train`: fit linear probes
-- `probe_val`: select hyperparameters (selection metric: validation `PID-10`)
-- `probe_test`: final report (held-out)
+We expanded the generator aux outputs to expose the full symmetric set of latent targets (10 total):
+
+- unique: `y_u1`, `y_u2`, `y_u3`
+- redundancy: `y_r12`, `y_r13`, `y_r23`, `y_r123`
+- synergy: `y_s12_3`, `y_s13_2`, `y_s23_1`
+
+Evaluation protocol (main experiment):
+
+- train SSL encoder(s)
+- freeze encoders
+- concatenate all three modalities (`x123` -> `[h1,h2,h3]`)
+- fit downstream linear regressors (Ridge) for each `y_*` target on the masked subsets
+- report held-out `R²`
+
+Tuning protocol:
+
+- same corrected same-world split
+- `probe_train` for regressor fit
+- `probe_val` for model/hyperparameter selection
+- `probe_test` for final report
+- selection metric (for the base downstream-tuned models): validation mean `R²` over all 10 `y_*` tasks (`y_macro_r2`)
 
 Methods:
 
@@ -590,76 +608,109 @@ Methods:
 4. `D`: ConFu-style (fusion-head)
 5. `E`: directional predictive hybrid (`[h_i,h_j] -> h_k`)
 
-Primary tuned artifacts:
+Primary downstream artifacts (regression version, kept as supplementary):
 
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_model_selection.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_selected_hparams.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_task_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_geometry_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_redundancy_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/pid10_confusions_fused_frozen_five_models_tuned_steps600.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_summary.png`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_y_downstream_model_selection.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_y_downstream_selected_hparams.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_y_downstream_x123_task_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_y_downstream_x123_summary.png`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_y_downstream_subset_ablations.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_y_downstream_subset_ablations.png`
 
-![PID-10 confusions, tuned 5-model comparison](test_outputs/pid_sar3_ssl_fused_confusions/pid10_confusions_fused_frozen_five_models_tuned_steps600.png)
+### 6.8.1 Downstream Proxy Classification (Primary Metric)
 
-*Figure 12. Tuned 600-step PID-10 confusion matrices. Hyperparameters are selected per method on validation `PID-10`, then reported on held-out test.*
+We convert each scalar `y_*` target into a balanced classification task by binning it into `5` quantile bins (fit on the train split only, per task), then train frozen-feature linear classifiers (multinomial logistic regression) on the masked subsets.
 
-![Tuned 600-step compact summary](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_summary.png)
+Reported metrics:
 
-*Figure 13. Tuned 600-step summary emphasizing `PID-10`, redundancy recall, `Rij/Sij->k` centroid overlap, and `R²(y_s12_3)`.*
+- `macro-F1`
+- `κ` (Cohen's kappa; random baseline near `0`)
+- `F1-skill = (macro-F1 - 1/K) / (1 - 1/K)` with `K=5`, so **random guessing is approximately `0`**
 
-#### Table 7. Tuned 600-Step Results (Selection on Validation `PID-10`, Report on Held-Out Test)
+Main classification artifacts:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_x123_task_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_x123_summary.png`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_subset_ablations.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_subset_ablations.png`
+
+![Tuned x123 downstream classification summary](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_x123_summary.png)
+
+*Figure 12. Main result: frozen `x123` downstream proxy classification (`y_*` quantile-bin tasks). Left: per-target `F1-skill`. Right: macro `F1-skill` summaries for all / unique / redundancy / synergy targets (random ≈ 0).*
+
+#### Table 7. Tuned 600-Step Downstream Classification Proxy Results (`x123`, held-out test)
 
 Sources:
 
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_task_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_geometry_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_redundancy_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_x123_task_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_y_downstream_selected_hparams.csv` (hyperparameters reused from the downstream regression tuning run)
 
-| Model | Selected hparams | PID-10 | Family-3 | `R` avg recall | mean matched `R/S` centroid cosine | mean matched `R/S` NC acc | `R²(y_s12_3)` |
+| Model | Selected hparams | all-`y` macro-F1 | all-`y` `F1-skill` | all-`y` `κ` | unique `F1-skill` | redundancy `F1-skill` | synergy `F1-skill` |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | `temp=0.4` | 0.658 | 0.617 | 0.647 | 0.768 | 0.553 | **-0.069** |
-| B: pairwise InfoNCE | `temp=0.4` | 0.685 | 0.632 | 0.677 | 0.986 | 0.552 | -0.308 |
-| C: TRIANGLE exact | `temp=0.1` | **0.807** | **0.749** | **0.784** | 0.978 | **0.652** | -0.381 |
-| D: ConFu fusion-head | `temp=0.2`, pair/fused=`0.5/0.5` | 0.712 | 0.649 | 0.719 | 0.988 | 0.565 | -0.265 |
-| E: directional predictive hybrid | `temp=0.2`, `directional_pred_weight=0.1` | 0.681 | 0.616 | 0.672 | 0.984 | 0.582 | -0.447 |
+| A: 3x unimodal SimCLR | `temp=0.1` | **0.316** | **0.145** | **0.155** | **0.258** | **0.174** | -0.005 |
+| B: pairwise InfoNCE | `temp=0.1` | 0.297 | 0.121 | 0.129 | 0.225 | 0.152 | -0.023 |
+| C: TRIANGLE exact | `temp=0.2` | 0.308 | 0.135 | 0.143 | 0.201 | 0.172 | **0.020** |
+| D: ConFu fusion-head | `temp=0.1`, pair/fused=`0.25/0.75` | 0.279 | 0.098 | 0.105 | 0.177 | 0.110 | 0.004 |
+| E: directional predictive hybrid | `temp=0.4`, `directional_pred_weight=0.5` | 0.305 | 0.131 | 0.138 | 0.210 | 0.158 | 0.015 |
 
-What this clarifies (and fixes in the earlier interpretation):
+#### Table 8. Selected Per-Target `y_*` Classification Results (held-out test, frozen `x123`)
 
-- **Tuning matters enough to change rankings within methods** (e.g., `A` and `B` prefer `temp=0.4`, TRIANGLE prefers `temp=0.1`).
-- **TRIANGLE exact is the clearest winner on class separation and redundancy classification** in this benchmark configuration.
-- **ConFu fusion-head improves substantially after tuning** and becomes a strong second-tier method on `PID-10` / `R` recall (ahead of untuned ConFu by a wide margin).
-- **Pairwise InfoNCE** improves strongly with tuning and long training, outperforming unimodal SimCLR on `PID-10` and `R` recall.
-- **Directional predictive hybrid** did not win under validation-`PID-10` tuning; in this sweep it preferred a **small** directional weight (`0.1`), which indicates the directional term can hurt classification when over-weighted.
-- The **`Rij <-> Sij->k` geometry pathology remains** for all higher-order/cross-modal methods (high matched `R/S` centroid overlap), even when classification improves.
+Source: `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_x123_task_summary.csv`
 
-Important nuance:
+| Target | Best model (`F1-skill`) | Notes |
+| --- | --- | --- |
+| `y_u1`, `y_u2`, `y_u3` | A (all three) | strongest unique-factor class separability under frozen linear probes |
+| `y_r12` | C (`0.182`) | TRIANGLE best on this pairwise redundancy target |
+| `y_r13` | E (`0.183`) | directional hybrid edges out others on this redundancy target |
+| `y_r23` | B (`0.261`) | pairwise InfoNCE strongest on this pairwise redundancy target |
+| `y_r123` | C (`0.199`) | TRIANGLE strongest on the 3-way redundancy target in classification form |
+| `y_s12_3` | A (`0.041`) | weak but positive; most others near/below zero |
+| `y_s13_2` | E (`0.034`) | directional hybrid best here |
+| `y_s23_1` | C (`0.049`) | TRIANGLE best here |
 
-- In this run, **unimodal SimCLR has the best `R²(y_s12_3)`** (least negative), which means the directional hybrid does not dominate directional-latent recoverability when tuning is done for classification. This is exactly why the tuning target must be stated explicitly.
+What this clarifies (and why this is a better primary benchmark than `PID-10`):
 
-#### Table 8. Selected Hyperparameters (Validation-Selected)
+- **The SSL methods are not interchangeable once the downstream target is explicit.**
+- **Ranking depends on the evaluation objective**:
+  - TRIANGLE wins on PID-term classification (Section 6.3 / classification-style analyses),
+  - but **unimodal SimCLR wins on frozen linear latent recoverability (`y_*` downstream probes)**.
+- **All methods are above random on many downstream tasks**, and the `F1-skill` scale makes that easy to read (`0` ≈ random).
+- **Unique and redundancy proxies are consistently learnable** (positive family `F1-skill` across methods), while **synergy remains much weaker**.
+- **TRIANGLE** is not the best overall downstream method, but it improves some specific redundancy/synergy proxy classification tasks (e.g. `y_r12`, `y_r123`, `y_s23_1`).
+- **Directional predictive hybrid** shows targeted gains on some synergy/redundancy proxies (`y_s13_2`, `y_r13`) but not enough to win the all-`y` downstream metric.
 
-Source: `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_five_models_selected_hparams.csv`
+This is the right interpretation target for the benchmark: frozen encoders should be judged by what PID-related latent variables they make linearly accessible, not only by a supervised PID label classifier.
 
-| Model | Selected setting |
-| --- | --- |
-| A: 3x unimodal SimCLR | `temp=0.4`, `steps=600` |
-| B: pairwise InfoNCE | `temp=0.4`, `steps=600` |
-| C: TRIANGLE exact | `temp=0.1`, `steps=600` |
-| D: ConFu fusion-head | `temp=0.2`, `confu_pair_weight=0.5`, `confu_fused_weight=0.5`, `steps=600` |
-| E: directional predictive hybrid | `temp=0.2`, `directional_pred_weight=0.1`, `steps=600` |
+#### Secondary Ablation (Subsets of Modalities)
+
+Subset ablations are now explicitly secondary and only used to diagnose what the encoders encode.
+
+Artifacts:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_subset_ablations.png`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_subset_ablations.csv`
+
+![Subset ablations on y-task classification families](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_subset_ablations.png)
+
+*Figure 13. Secondary ablations: frozen-feature downstream `y_*` classification family summaries (`F1-skill`) for modality subsets (`x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`).*
+
+Key ablation pattern:
+
+- `x123` is best for the downstream classification proxy metric for A, B, D, and E.
+- For C (TRIANGLE), `x23` slightly outperforms `x123` on all-`y` `F1-skill` in this run.
+- This reinforces why subset ablations should be diagnostic only, not the main ranking criterion.
 
 Supporting note:
 
-- We keep the earlier untuned long-run artifacts (`long_steps_600_*`) as a useful baseline for showing why tuning changes conclusions, but the tuned validation-selected comparison above is the one to use for primary claims.
+- We keep both the regression-based downstream probes (`tuned_long_steps_600_y_downstream_*`) and the PID-label classification artifacts (`tuned_long_steps_600_five_models_*`) as supporting analyses, but the primary SSL conclusion in this notes file is now based on the frozen `x123` downstream `y_*` classification proxy suite.
 
-### 6.9 What To Do Next (Now That Tuning Is In Place)
+### 6.9 What To Do Next (Downstream-First)
 
-1. Add a **directional-hybrid tuning track selected on a directional metric** (e.g., validation `R²(y_s12_3)` or synergy-only recall) and compare against the classification-selected version to make the tradeoff explicit.
-2. Evaluate both `h` and `z` (encoder vs projector outputs) for all tuned models.
-3. Add regime-stratified evaluation (`rho`, `sigma`, `hop`) to test whether TRIANGLE/ConFu gains are strongest in specific regimes.
-4. Add a formal `R-only` benchmark mode (high `rho`, lower `sigma`) as a shared-information sanity stage.
-5. Add a `S-only` directional benchmark stage to test the predictive head under the metric it is meant to optimize.
+1. Add a **synergy-focused tuning track** (select on validation synergy `F1-skill` instead of all-`y`) and compare with the all-`y` selected models.
+2. Evaluate both `h` and `z` (encoder vs projector outputs) for the downstream `y_*` classification probes; some objectives may hide more linear information in `h`.
+3. Add regime-stratified downstream results (`rho`, `sigma`, `hop`) to identify where higher-order methods help or hurt.
+4. Add formal `R-only` and `S-only` benchmark stages with the same frozen-encoder downstream protocol.
+5. Keep PID-term classification as a separate supervised stress test, not the main SSL ranking metric.
 
 ### 6.10 Reproducing the SSL Comparisons
 

@@ -1,0 +1,6 @@
+model,temp,steps,confu_pair_weight,confu_fused_weight,directional_pred_weight,selection_metric,selection_val_y_macro_r2
+A_unimodal_simclr,0.1,600.0,0.5,0.5,0.5,val_y_macro_r2,0.1120836751656357
+B_pairwise_infonce,0.1,600.0,0.5,0.5,0.5,val_y_macro_r2,-0.01671406000427167
+C_triangle_exact,0.2,600.0,0.5,0.5,0.5,val_y_macro_r2,-0.017148002392121154
+D_confu_fusion_head,0.1,600.0,0.25,0.75,0.5,val_y_macro_r2,0.0181500140976953
+E_directional_predictive_hybrid,0.4,600.0,0.5,0.5,0.5,val_y_macro_r2,0.03315195276672093

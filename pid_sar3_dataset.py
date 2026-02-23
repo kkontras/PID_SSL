@@ -189,12 +189,24 @@ class PIDSar3DatasetGenerator:
             aux = {
                 "y_u1": np.float32(0.0),
                 "mask_y_u1": np.int64(0),
+                "y_u2": np.float32(0.0),
+                "mask_y_u2": np.int64(0),
+                "y_u3": np.float32(0.0),
+                "mask_y_u3": np.int64(0),
                 "y_r12": np.float32(0.0),
                 "mask_y_r12": np.int64(0),
+                "y_r13": np.float32(0.0),
+                "mask_y_r13": np.int64(0),
+                "y_r23": np.float32(0.0),
+                "mask_y_r23": np.int64(0),
                 "y_r123": np.float32(0.0),
                 "mask_y_r123": np.int64(0),
                 "y_s12_3": np.float32(0.0),
                 "mask_y_s12_3": np.int64(0),
+                "y_s13_2": np.float32(0.0),
+                "mask_y_s13_2": np.int64(0),
+                "y_s23_1": np.float32(0.0),
+                "mask_y_s23_1": np.int64(0),
             }
 
         name = PID_ID_TO_NAME[pid_id]
@@ -203,9 +215,16 @@ class PIDSar3DatasetGenerator:
             u = self.rng.normal(size=(self.cfg.m,))
             target_view = int(name[-1])
             x = self._project(target_view, name, u, alpha)
-            if return_aux and pid_id == 0:
-                aux["y_u1"] = np.float32(u[0])
-                aux["mask_y_u1"] = np.int64(1)
+            if return_aux:
+                if pid_id == 0:
+                    aux["y_u1"] = np.float32(u[0])
+                    aux["mask_y_u1"] = np.int64(1)
+                elif pid_id == 1:
+                    aux["y_u2"] = np.float32(u[0])
+                    aux["mask_y_u2"] = np.int64(1)
+                elif pid_id == 2:
+                    aux["y_u3"] = np.float32(u[0])
+                    aux["mask_y_u3"] = np.int64(1)
             if target_view == 1:
                 x1 = x.astype(np.float32)
             elif target_view == 2:
@@ -223,9 +242,16 @@ class PIDSar3DatasetGenerator:
             i, j = int(name[1]), int(name[2])
             xi = self._project(i, name, ri, alpha)
             xj = self._project(j, name, rj, alpha)
-            if return_aux and pid_id == 3:
-                aux["y_r12"] = np.float32(r[0])
-                aux["mask_y_r12"] = np.int64(1)
+            if return_aux:
+                if pid_id == 3:
+                    aux["y_r12"] = np.float32(r[0])
+                    aux["mask_y_r12"] = np.int64(1)
+                elif pid_id == 4:
+                    aux["y_r13"] = np.float32(r[0])
+                    aux["mask_y_r13"] = np.int64(1)
+                elif pid_id == 5:
+                    aux["y_r23"] = np.float32(r[0])
+                    aux["mask_y_r23"] = np.int64(1)
             if i == 1:
                 x1 = xi.astype(np.float32)
             elif i == 2:
@@ -266,9 +292,16 @@ class PIDSar3DatasetGenerator:
             s0 = self.synergy_mlp(a, b, hop)
             s = s0 - (a @ self.C_a[hop]) - (b @ self.C_b[hop])
             xk = self._project(target, syn_comp, s, alpha)
-            if return_aux and pid_id == 7:
-                aux["y_s12_3"] = np.float32(s[0])
-                aux["mask_y_s12_3"] = np.int64(1)
+            if return_aux:
+                if pid_id == 7:
+                    aux["y_s12_3"] = np.float32(s[0])
+                    aux["mask_y_s12_3"] = np.int64(1)
+                elif pid_id == 8:
+                    aux["y_s13_2"] = np.float32(s[0])
+                    aux["mask_y_s13_2"] = np.int64(1)
+                elif pid_id == 9:
+                    aux["y_s23_1"] = np.float32(s[0])
+                    aux["mask_y_s23_1"] = np.int64(1)
 
             if source_i == 1:
                 x1 = xi.astype(np.float32)
@@ -336,12 +369,24 @@ class PIDSar3DatasetGenerator:
                 {
                     "y_u1": np.zeros((n,), dtype=np.float32),
                     "mask_y_u1": np.zeros((n,), dtype=np.int64),
+                    "y_u2": np.zeros((n,), dtype=np.float32),
+                    "mask_y_u2": np.zeros((n,), dtype=np.int64),
+                    "y_u3": np.zeros((n,), dtype=np.float32),
+                    "mask_y_u3": np.zeros((n,), dtype=np.int64),
                     "y_r12": np.zeros((n,), dtype=np.float32),
                     "mask_y_r12": np.zeros((n,), dtype=np.int64),
+                    "y_r13": np.zeros((n,), dtype=np.float32),
+                    "mask_y_r13": np.zeros((n,), dtype=np.int64),
+                    "y_r23": np.zeros((n,), dtype=np.float32),
+                    "mask_y_r23": np.zeros((n,), dtype=np.int64),
                     "y_r123": np.zeros((n,), dtype=np.float32),
                     "mask_y_r123": np.zeros((n,), dtype=np.int64),
                     "y_s12_3": np.zeros((n,), dtype=np.float32),
                     "mask_y_s12_3": np.zeros((n,), dtype=np.int64),
+                    "y_s13_2": np.zeros((n,), dtype=np.float32),
+                    "mask_y_s13_2": np.zeros((n,), dtype=np.int64),
+                    "y_s23_1": np.zeros((n,), dtype=np.float32),
+                    "mask_y_s23_1": np.zeros((n,), dtype=np.int64),
                 }
             )
 

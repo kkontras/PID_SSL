@@ -617,7 +617,86 @@ Primary downstream artifacts (regression version, kept as supplementary):
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_y_downstream_subset_ablations.csv`
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_y_downstream_subset_ablations.png`
 
-### 6.8.1 Downstream Proxy Classification (Primary Metric)
+### 6.8.1 Rotated Pair->Target Modality Classification (Primary Metric)
+
+The main downstream benchmark should use modalities directly:
+
+- input: **two modalities**
+- target: **the third modality**
+- frozen encoders
+- rotate across all three directions: `23 -> 1`, `13 -> 2`, `12 -> 3`
+
+This avoids introducing a separate hand-designed target variable as the primary task. Instead, we test whether the pretrained representation supports actual cross-modal prediction.
+
+Task construction (classification, random ≈ 0 baseline on the normalized score):
+
+- use frozen features of the two input modalities (concatenated)
+- predict the target modality observation vector `x_target`
+- convert each target dimension into a binary classification task by thresholding at the **train median** (per dimension)
+- fit a linear classifier per target dimension
+- average across target dimensions
+
+Reported metrics:
+
+- `macro-F1` (averaged over target dimensions)
+- `κ` (Cohen's kappa; random near `0`)
+- `F1-skill = (F1 - 0.5) / 0.5` for the median-balanced binary tasks, so **random ≈ 0**
+
+We evaluate:
+
+- overall per rotation (`23->1`, `13->2`, `12->3`)
+- per PID atom within each rotation (full `PID x rotation` table/heatmap)
+
+Primary pair->target artifacts:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_overall_rotation_scores.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_scores.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.png`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_heatmaps.png`
+
+![Rotated pair->target downstream summary](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.png)
+
+*Figure 12. Main downstream benchmark: rotated pair->target modality classification with frozen encoders. Left: rotation-averaged `F1-skill`. Middle: heuristic “applicable PID” average. Right: applicability gap (`applicable - non-applicable`).*
+
+![PID-by-rotation pair->target heatmaps](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_heatmaps.png)
+
+*Figure 13. Full `PID x rotation` pair->target downstream scores (`F1-skill`; random ≈ 0) for each method.*
+
+#### Table 7. Rotated Pair->Target Downstream Results (frozen encoders, held-out test)
+
+Sources:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_overall_rotation_scores.csv`
+
+| Model | rotation-avg macro-F1 | rotation-avg `F1-skill` | rotation-avg `κ` |
+| --- | ---: | ---: | ---: |
+| A: 3x unimodal SimCLR | 0.517 | 0.035 | 0.034 |
+| B: pairwise InfoNCE | 0.639 | 0.277 | 0.280 |
+| C: TRIANGLE exact | 0.651 | 0.301 | 0.303 |
+| D: ConFu fusion-head | 0.629 | 0.257 | 0.258 |
+| E: directional predictive hybrid | **0.653** | **0.305** | **0.303** |
+
+Rotation-level highlights:
+
+- `13->2`: **E** is strongest (`F1-skill = 0.329`)
+- `12->3`: **E** is strongest (`0.313`)
+- `23->1`: **D** is strongest (`0.294`), with `C` close (`0.287`)
+
+What this clarifies:
+
+- This benchmark is much closer to the intended multimodal question than PID-label classification or latent `y_*` probes alone.
+- **Cross-modal methods now clearly outperform unimodal SimCLR** on the true pair->target task (A is near-random on the normalized scale).
+- **TRIANGLE and the directional predictive hybrid are the strongest overall** in this pair->target setting, with **E** narrowly best in rotation-averaged `F1-skill`.
+- **ConFu fusion-head** is competitive and strong, especially on one rotation (`23->1`).
+
+Important note on the heuristic “applicable PID” averages:
+
+- We also computed a simple heuristic split of PID atoms into “applicable / non-applicable” for each rotation, but the averages are noisy and not yet a reliable primary metric.
+- The full `PID x rotation` heatmaps are more informative than the heuristic scalar summary.
+
+### 6.8.2 Downstream Proxy Classification on `y_*` (Supplementary Diagnostic)
 
 We convert each scalar `y_*` target into a balanced classification task by binning it into `5` quantile bins (fit on the train split only, per task), then train frozen-feature linear classifiers (multinomial logistic regression) on the masked subsets.
 
@@ -627,7 +706,7 @@ Reported metrics:
 - `κ` (Cohen's kappa; random baseline near `0`)
 - `F1-skill = (macro-F1 - 1/K) / (1 - 1/K)` with `K=5`, so **random guessing is approximately `0`**
 
-Main classification artifacts:
+Supplementary `y_*` classification artifacts:
 
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_x123_task_summary.csv`
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_x123_summary.png`
@@ -636,9 +715,9 @@ Main classification artifacts:
 
 ![Tuned x123 downstream classification summary](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_x123_summary.png)
 
-*Figure 12. Main result: frozen `x123` downstream proxy classification (`y_*` quantile-bin tasks). Left: per-target `F1-skill`. Right: macro `F1-skill` summaries for all / unique / redundancy / synergy targets (random ≈ 0).*
+*Figure 14. Supplementary diagnostic: frozen `x123` downstream proxy classification on latent `y_*` targets. Left: per-target `F1-skill`. Right: family-level macro `F1-skill` summaries (random ≈ 0).*
 
-#### Table 7. Tuned 600-Step Downstream Classification Proxy Results (`x123`, held-out test)
+#### Table 8. Tuned 600-Step `y_*` Downstream Classification Proxy Results (`x123`, held-out test)
 
 Sources:
 
@@ -653,7 +732,7 @@ Sources:
 | D: ConFu fusion-head | `temp=0.1`, pair/fused=`0.25/0.75` | 0.279 | 0.098 | 0.105 | 0.177 | 0.110 | 0.004 |
 | E: directional predictive hybrid | `temp=0.4`, `directional_pred_weight=0.5` | 0.305 | 0.131 | 0.138 | 0.210 | 0.158 | 0.015 |
 
-#### Table 8. Selected Per-Target `y_*` Classification Results (held-out test, frozen `x123`)
+#### Table 9. Selected Per-Target `y_*` Classification Results (held-out test, frozen `x123`)
 
 Source: `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_x123_task_summary.csv`
 
@@ -692,7 +771,7 @@ Artifacts:
 
 ![Subset ablations on y-task classification families](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_ycls_subset_ablations.png)
 
-*Figure 13. Secondary ablations: frozen-feature downstream `y_*` classification family summaries (`F1-skill`) for modality subsets (`x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`).*
+*Figure 15. Secondary ablations: frozen-feature downstream `y_*` classification family summaries (`F1-skill`) for modality subsets (`x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`).*
 
 Key ablation pattern:
 
@@ -702,7 +781,7 @@ Key ablation pattern:
 
 Supporting note:
 
-- We keep both the regression-based downstream probes (`tuned_long_steps_600_y_downstream_*`) and the PID-label classification artifacts (`tuned_long_steps_600_five_models_*`) as supporting analyses, but the primary SSL conclusion in this notes file is now based on the frozen `x123` downstream `y_*` classification proxy suite.
+- We keep both the regression-based downstream probes (`tuned_long_steps_600_y_downstream_*`) and the PID-label classification artifacts (`tuned_long_steps_600_five_models_*`) as supporting analyses, but the primary SSL conclusion in this notes file is now based on the **rotated pair->target modality** downstream benchmark (Section 6.8.1). The `y_*` probe suites remain useful diagnostics for interpretability.
 
 ### 6.9 What To Do Next (Downstream-First)
 

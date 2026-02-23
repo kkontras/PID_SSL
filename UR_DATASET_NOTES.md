@@ -437,12 +437,6 @@ Implementation entry point:
 
 *Figure 8. Row-normalized `PID-10` confusion matrices for the two contrastive models using frozen encoders and concatenated modalities (`[h1,h2,h3]`) with a linear probe.* This is the main result figure for SSL comparison at this stage.
 
-#### Family-3 Confusions (Secondary but Useful)
-
-![Family-3 confusion matrices, fused frozen encoders](test_outputs/pid_sar3_ssl_fused_confusions/family3_confusions_fused_frozen_two_models.png)
-
-*Figure 9. Row-normalized `Family-3` confusion matrices (`Unique / Redundancy / Synergy`) under the same fused frozen validation protocol.* This complements Figure 8 by showing the coarser failure pattern.
-
 ### 6.4 What the Confusions Show (Most Important Takeaways)
 
 From the fused frozen `PID-10` confusions:
@@ -471,19 +465,59 @@ Concrete high-count off-diagonal examples (from `fused_frozen_two_models_confusi
 
 This is the core result to optimize against, more than a single scalar accuracy.
 
-### 6.5 Secondary Summary: All Supervised Tasks (Same Fused Frozen Protocol)
+### 6.5 Geometry Diagnostics (Why the Confusions Look This Way)
 
-Confusions are the primary output for classification tasks, but we still report the full supervised suite under the **same validation protocol**:
+To make the representation-space argument explicit (instead of relying only on probe outcomes), we added geometry diagnostics on the fused frozen feature space `[h1,h2,h3]`.
+
+Diagnostics use:
+
+- train-set PID centroids in standardized + row-normalized feature space
+- held-out sample margins vs nearest competing centroid
+- matched `Rij` vs `Sij->k` pair overlap/separability metrics
+
+#### PID Class-Centroid Geometry
+
+![PID centroid cosine heatmaps](test_outputs/pid_sar3_ssl_fused_confusions/geometry_pid_centroid_cosine_heatmaps.png)
+
+*Figure 9. PID class-centroid cosine matrices (train centroids) in the fused frozen representation space.* Model B (pairwise InfoNCE) shows much higher cosine similarity between matched redundancy/synergy class centroids, indicating stronger geometric overlap.
+
+#### Matched R/S Overlap and Margin Diagnostics
+
+![Geometry diagnostics: matched R/S overlap and margins](test_outputs/pid_sar3_ssl_fused_confusions/geometry_rs_overlap_and_margins.png)
+
+*Figure 10. Geometry diagnostics for the fused frozen representation space.* Left: matched `Rij`/`Sij->k` centroid cosine (higher means more overlap). Middle: nearest-centroid separability within each matched `Rij` vs `Sij->k` pair. Right: family-level mean margin (`U/R/S`) on held-out data.
+
+#### Table 3. Geometry Summary (Most Important Metrics)
+
+Source: `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_two_models_geometry_summary.csv`
+
+| Metric | Item | Model A (3 unimodal SimCLR) | Model B (3 pairwise InfoNCE) | `B - A` |
+| --- | --- | ---: | ---: | ---: |
+| Overall mean margin | all PID classes | -0.053 | -0.088 | -0.035 |
+| Family mean margin | `U` | -0.006 | 0.014 | +0.020 |
+| Family mean margin | `R` | -0.076 | -0.134 | -0.057 |
+| Family mean margin | `S` | -0.067 | -0.129 | -0.062 |
+| Matched pair centroid cosine | `R12` vs `S12->3` | 0.763 | 0.929 | +0.166 |
+| Matched pair centroid cosine | `R13` vs `S13->2` | 0.825 | 0.938 | +0.113 |
+| Matched pair centroid cosine | `R23` vs `S23->1` | 0.774 | 0.940 | +0.166 |
+| Matched pair nearest-centroid acc | `R12` vs `S12->3` | 0.528 | 0.522 | -0.006 |
+| Matched pair nearest-centroid acc | `R13` vs `S13->2` | 0.578 | 0.509 | -0.069 |
+| Matched pair nearest-centroid acc | `R23` vs `S23->1` | 0.500 | 0.466 | -0.034 |
+
+This makes the earlier interpretation concrete:
+
+- Model B improves some latent linear readouts but geometrically pulls matched `Rij` and `Sij->k` classes closer together.
+- That increased centroid overlap is consistent with the larger `Rij <-> Sij->k` confusion bands in Figure 8.
+
+### 6.6 Compact Supervised Summary (Same Fused Frozen Protocol)
+
+We keep one compact summary table for the full supervised suite under the same validation protocol:
 
 - `PID-10` classification
 - `Family-3` classification
 - latent-target regression probes (`y_u1`, `y_r12`, `y_r123`, `y_s12_3`)
 
-![All supervised tasks summary](test_outputs/pid_sar3_ssl_fused_confusions/all_supervised_tasks_fused_frozen_two_models.png)
-
-*Figure 10. Secondary summary of all supervised tasks using frozen encoders + concatenated modalities + linear probes.* Use this figure to complement the confusion matrices, not replace them.
-
-#### Table 3. Fused Frozen Linear-Probe Summary for the Two Models
+#### Table 4. Fused Frozen Linear-Probe Summary for the Two Models
 
 Source: `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_two_models_task_summary.csv`
 
@@ -502,14 +536,14 @@ Interpretation:
 - Model B is better for the current **latent scalar linear recoverability** readout (all `R²` values are still poor/negative, but consistently less bad).
 - The objectives appear to emphasize different geometry, which is exactly what this validation is meant to expose.
 
-### 6.6 What To Improve Next (Based on the Confusions, Not Just Scores)
+### 6.7 What To Improve Next (Based on Confusions + Geometry)
 
 The persistent `Rij <-> Sij->k` confusion suggests the current contrastive objectives do not sufficiently separate:
 
 - pairwise shared structure (redundancy)
 - directional target-generating structure (synergy)
 
-The next objective variants should be judged by whether they reduce those specific off-diagonal bands in Figure 8, not only by aggregate accuracy.
+The next objective variants should be judged by whether they reduce those specific off-diagonal bands in Figure 8 **and** lower the matched `Rij`/`Sij->k` centroid cosine in Figure 10.
 
 Promising next directions:
 
@@ -517,7 +551,7 @@ Promising next directions:
 2. Use a hybrid loss: pairwise contrastive + target prediction, then re-check the `Rij <-> Sij->k` confusion bands.
 3. Probe `h` vs `z` separately (encoder output vs projector output), since SimCLR-style projectors can hide linearly decodable latent structure.
 
-### 6.7 Reproducing the Revised SSL Comparison
+### 6.8 Reproducing the Revised SSL Comparison
 
 ```bash
 python - <<'PY'

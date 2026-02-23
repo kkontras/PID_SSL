@@ -91,6 +91,88 @@ def _fit_ridge_r2(Xtr: np.ndarray, ytr: np.ndarray, Xte: np.ndarray, yte: np.nda
     return float(1.0 - ss_res / ss_tot)
 
 
+def _prepare_geometry_space(Xtr: np.ndarray, Xte: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Standardize features and l2-normalize rows for cosine-geometry diagnostics."""
+    scaler = StandardScaler()
+    Xtr_s = scaler.fit_transform(Xtr)
+    Xte_s = scaler.transform(Xte)
+    Xtr_n = Xtr_s / (np.linalg.norm(Xtr_s, axis=1, keepdims=True) + 1e-8)
+    Xte_n = Xte_s / (np.linalg.norm(Xte_s, axis=1, keepdims=True) + 1e-8)
+    return Xtr_n.astype(np.float32), Xte_n.astype(np.float32)
+
+
+def _class_centroids(X: np.ndarray, y: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    cents = []
+    for lab in labels:
+        Xi = X[y == lab]
+        c = Xi.mean(axis=0)
+        c = c / (np.linalg.norm(c) + 1e-8)
+        cents.append(c)
+    return np.stack(cents, axis=0).astype(np.float32)
+
+
+def _centroid_cosine_matrix(centroids: np.ndarray) -> np.ndarray:
+    return (centroids @ centroids.T).astype(np.float32)
+
+
+def _class_margin_stats(X: np.ndarray, y: np.ndarray, centroids: np.ndarray, labels: np.ndarray) -> Tuple[np.ndarray, float]:
+    label_to_idx = {int(l): i for i, l in enumerate(labels)}
+    sims = X @ centroids.T  # cosine since both normalized
+    margins = np.zeros((X.shape[0],), dtype=np.float32)
+    class_means = np.zeros((labels.shape[0],), dtype=np.float32)
+    for n in range(X.shape[0]):
+        ci = label_to_idx[int(y[n])]
+        true_sim = sims[n, ci]
+        other_max = np.max(np.concatenate([sims[n, :ci], sims[n, ci + 1 :]]))
+        margins[n] = float(true_sim - other_max)
+    for i, lab in enumerate(labels):
+        m = y == lab
+        class_means[i] = float(np.mean(margins[m])) if np.any(m) else np.nan
+    return class_means, float(np.mean(margins))
+
+
+def _nearest_centroid_pair_acc(X: np.ndarray, y: np.ndarray, centroids: np.ndarray, a: int, b: int) -> float:
+    mask = (y == a) | (y == b)
+    Xp = X[mask]
+    yp = y[mask]
+    if Xp.shape[0] == 0:
+        return float("nan")
+    sims = Xp @ centroids[[a, b]].T
+    pred = np.where(np.argmax(sims, axis=1) == 0, a, b)
+    return float(np.mean(pred == yp))
+
+
+def _compute_geometry_diagnostics(Xtr: np.ndarray, ytr: np.ndarray, Xte: np.ndarray, yte: np.ndarray) -> Dict[str, np.ndarray]:
+    labels = np.arange(10, dtype=np.int64)
+    Xtr_g, Xte_g = _prepare_geometry_space(Xtr, Xte)
+    centroids = _class_centroids(Xtr_g, ytr, labels)
+    C = _centroid_cosine_matrix(centroids)
+    class_margin_means, overall_margin = _class_margin_stats(Xte_g, yte, centroids, labels)
+
+    rs_pairs = [(3, 7), (4, 8), (5, 9)]  # (R12,S12->3), (R13,S13->2), (R23,S23->1)
+    pair_accs = []
+    pair_centroid_cos = []
+    for a, b in rs_pairs:
+        pair_accs.append(_nearest_centroid_pair_acc(Xte_g, yte, centroids, a, b))
+        pair_centroid_cos.append(float(C[a, b]))
+
+    family_groups = {
+        "U": np.array([0, 1, 2], dtype=np.int64),
+        "R": np.array([3, 4, 5, 6], dtype=np.int64),
+        "S": np.array([7, 8, 9], dtype=np.int64),
+    }
+    family_margins = np.array([np.mean(class_margin_means[idxs]) for idxs in family_groups.values()], dtype=np.float32)
+
+    return {
+        "centroid_cosine": C,
+        "class_margin_means": class_margin_means,
+        "overall_margin": np.array([overall_margin], dtype=np.float32),
+        "rs_pair_accs": np.asarray(pair_accs, dtype=np.float32),
+        "rs_pair_centroid_cos": np.asarray(pair_centroid_cos, dtype=np.float32),
+        "family_margin_means": family_margins,
+    }
+
+
 def _concat_raw(batch: Dict[str, np.ndarray]) -> np.ndarray:
     return np.concatenate([batch["x1"], batch["x2"], batch["x3"]], axis=1).astype(np.float32)
 
@@ -171,6 +253,64 @@ def _plot_two_confusions(cm_a: np.ndarray, cm_b: np.ndarray, labels: List[str], 
     _savefig(out_path)
 
 
+def _plot_geometry_diagnostics(diag_a: Dict[str, np.ndarray], diag_b: Dict[str, np.ndarray], out_dir: Path) -> None:
+    # Figure A: centroid cosine heatmaps
+    fig, axes = plt.subplots(1, 2, figsize=(18.0, 6.4))
+    for ax, D, title in zip(
+        axes,
+        [diag_a["centroid_cosine"], diag_b["centroid_cosine"]],
+        ["Model A centroid cosine (train centroids)", "Model B centroid cosine (train centroids)"],
+    ):
+        im = ax.imshow(D, vmin=-0.3, vmax=1.0, cmap="coolwarm", aspect="auto")
+        ax.set_xticks(range(10))
+        ax.set_xticklabels(PID_NAMES, rotation=35, ha="right", fontsize=8)
+        ax.set_yticks(range(10))
+        ax.set_yticklabels(PID_NAMES, fontsize=8)
+        ax.set_title(title)
+    fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.025, pad=0.02)
+    fig.suptitle("Geometry diagnostic: PID class-centroid cosine structure", y=0.98)
+    _savefig(out_dir / "geometry_pid_centroid_cosine_heatmaps.png")
+
+    # Figure B: matched R<->S pair overlap + separability and family margins
+    pair_labels = ["R12 vs S12->3", "R13 vs S13->2", "R23 vs S23->1"]
+    x = np.arange(3)
+    w = 0.36
+    fig, axes = plt.subplots(1, 3, figsize=(18.8, 5.2))
+
+    axes[0].bar(x - w / 2, diag_a["rs_pair_centroid_cos"], width=w, color="#4c78a8", label="Model A")
+    axes[0].bar(x + w / 2, diag_b["rs_pair_centroid_cos"], width=w, color="#f58518", label="Model B")
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(pair_labels, rotation=22, ha="right")
+    axes[0].set_ylabel("centroid cosine (higher = more overlap)")
+    axes[0].set_title("Matched R/S pair centroid overlap")
+    axes[0].grid(axis="y", alpha=0.25)
+    axes[0].legend(frameon=False)
+
+    axes[1].bar(x - w / 2, diag_a["rs_pair_accs"], width=w, color="#4c78a8")
+    axes[1].bar(x + w / 2, diag_b["rs_pair_accs"], width=w, color="#f58518")
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(pair_labels, rotation=22, ha="right")
+    axes[1].set_ylim(0.45, 1.02)
+    axes[1].set_ylabel("nearest-centroid pair accuracy")
+    axes[1].set_title("Matched R/S pair separability (held-out)")
+    axes[1].grid(axis="y", alpha=0.25)
+
+    fam_labels = ["U", "R", "S"]
+    xf = np.arange(3)
+    axes[2].bar(xf - w / 2, diag_a["family_margin_means"], width=w, color="#4c78a8")
+    axes[2].bar(xf + w / 2, diag_b["family_margin_means"], width=w, color="#f58518")
+    axes[2].axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
+    axes[2].set_xticks(xf)
+    axes[2].set_xticklabels(fam_labels)
+    axes[2].set_ylabel("mean class margin")
+    axes[2].set_title("Family-level margin geometry")
+    axes[2].grid(axis="y", alpha=0.25)
+
+    fig.suptitle("Geometry diagnostics in fused frozen representation space", y=0.98)
+    fig.subplots_adjust(bottom=0.28, wspace=0.35)
+    _savefig(out_dir / "geometry_rs_overlap_and_margins.png")
+
+
 def test_plot_fused_confusions_two_models():
     out_dir = _ensure_plot_dir()
 
@@ -204,6 +344,12 @@ def test_plot_fused_confusions_two_models():
     Xte_b = _concat_trimodal_frozen(trimodal_model, probe_test)
     eval_b = _evaluate_all_tasks(Xtr_b, probe_train, Xte_b, probe_test)
 
+    # Geometry diagnostics on fused frozen representation spaces (train centroids, test evaluation).
+    ytr_pid = probe_train["pid_id"].astype(np.int64)
+    yte_pid = probe_test["pid_id"].astype(np.int64)
+    geom_a = _compute_geometry_diagnostics(Xtr_a, ytr_pid, Xte_a, yte_pid)
+    geom_b = _compute_geometry_diagnostics(Xtr_b, ytr_pid, Xte_b, yte_pid)
+
     # Confusion matrices are the primary output.
     _plot_two_confusions(
         eval_a["_pid_cm"],  # type: ignore[index]
@@ -223,6 +369,7 @@ def test_plot_fused_confusions_two_models():
         out_dir / "family3_confusions_fused_frozen_two_models.png",
         "Family-3 confusion matrices (all modalities concatenated, frozen encoders + linear probe)",
     )
+    _plot_geometry_diagnostics(geom_a, geom_b, out_dir)
 
     # Compact all-task summary (secondary to confusions).
     task_order = ["pid10_acc", "family3_acc", "y_u1_r2", "y_r12_r2", "y_r123_r2", "y_s12_3_r2"]
@@ -296,6 +443,57 @@ def test_plot_fused_confusions_two_models():
                 for i, li in enumerate(labels):
                     for j, lj in enumerate(labels):
                         writer.writerow([target, model_name, li, lj, int(cm[i, j])])
+
+    # Geometry CSVs (compact + class-level details)
+    with (out_dir / "fused_frozen_two_models_geometry_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["metric", "item", "model_a_unimodal_simclr_sum", "model_b_pairwise_infonce_sum", "b_minus_a"])
+        writer.writerow(
+            [
+                "overall_margin",
+                "all_pid_classes",
+                float(geom_a["overall_margin"][0]),
+                float(geom_b["overall_margin"][0]),
+                float(geom_b["overall_margin"][0] - geom_a["overall_margin"][0]),
+            ]
+        )
+        for fam, i in zip(["U", "R", "S"], range(3)):
+            writer.writerow(
+                [
+                    "family_mean_margin",
+                    fam,
+                    float(geom_a["family_margin_means"][i]),
+                    float(geom_b["family_margin_means"][i]),
+                    float(geom_b["family_margin_means"][i] - geom_a["family_margin_means"][i]),
+                ]
+            )
+        for lbl, i in zip(["R12_vs_S12->3", "R13_vs_S13->2", "R23_vs_S23->1"], range(3)):
+            writer.writerow(
+                [
+                    "matched_rs_pair_nearest_centroid_acc",
+                    lbl,
+                    float(geom_a["rs_pair_accs"][i]),
+                    float(geom_b["rs_pair_accs"][i]),
+                    float(geom_b["rs_pair_accs"][i] - geom_a["rs_pair_accs"][i]),
+                ]
+            )
+            writer.writerow(
+                [
+                    "matched_rs_pair_centroid_cosine",
+                    lbl,
+                    float(geom_a["rs_pair_centroid_cos"][i]),
+                    float(geom_b["rs_pair_centroid_cos"][i]),
+                    float(geom_b["rs_pair_centroid_cos"][i] - geom_a["rs_pair_centroid_cos"][i]),
+                ]
+            )
+
+    with (out_dir / "fused_frozen_two_models_class_margins.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["pid_id", "pid_name", "model_a_class_margin", "model_b_class_margin", "b_minus_a"])
+        for pid_id, pid_name in enumerate(PID_NAMES):
+            a_val = float(geom_a["class_margin_means"][pid_id])
+            b_val = float(geom_b["class_margin_means"][pid_id])
+            writer.writerow([pid_id, pid_name, a_val, b_val, b_val - a_val])
 
     assert np.isfinite(eval_a["pid10_acc"]) and np.isfinite(eval_b["pid10_acc"])
     assert np.isfinite(eval_a["family3_acc"]) and np.isfinite(eval_b["family3_acc"])

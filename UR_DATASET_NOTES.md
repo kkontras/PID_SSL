@@ -30,7 +30,7 @@ For `U_i`, the generator samples a latent Gaussian vector $u \sim \mathcal{N}(0,
 
 ### 1.7 Pairwise Redundancy Atoms
 
-For `R_{ij}`, the generator samples $r,\eta_i,\eta_j \overset{\mathrm{i.i.d.}}{\sim} \mathcal{N}(0,I_m)$ and constructs view-specific latent realizations with overlap coefficient `rho` as $r_i = \sqrt{\rho}\,r + \sqrt{1-\rho}\,\eta_i$ and $r_j = \sqrt{\rho}\,r + \sqrt{1-\rho}\,\eta_j$. The observations are then generated as $x_i = \alpha P_i^{(R_{ij})} r_i + \varepsilon_i$ and $x_j = \alpha P_j^{(R_{ij})} r_j + \varepsilon_j$, while $x_k = \varepsilon_k$ for $k\notin\{i,j\}$. As `rho` increases, the shared structure between the two active views becomes stronger.
+For `R_{ij}`, the generator first samples three independent latent vectors `r`, `eta_i`, and `eta_j`, each from a standard Gaussian in `R^m`. It then constructs view-specific latent realizations with overlap coefficient `rho` as $r_i = \sqrt{\rho}\,r + \sqrt{1-\rho}\,\eta_i$ and $r_j = \sqrt{\rho}\,r + \sqrt{1-\rho}\,\eta_j$. The observations are generated as $x_i = \alpha P_i^{(R_{ij})} r_i + \varepsilon_i$ and $x_j = \alpha P_j^{(R_{ij})} r_j + \varepsilon_j$, while $x_k = \varepsilon_k$ for $k\notin\{i,j\}$. As `rho` increases, the shared structure between the two active views becomes stronger.
 
 ### 1.8 Triple Redundancy Atom
 
@@ -86,7 +86,19 @@ This section is ordered by evidential value for validating the generator. First 
 
 This is the primary validation figure. Each panel uses a single-atom dataset (`U1`, `R12`, `R123`, or `S12->3`) under low noise (`sigma = 0.05`, `alpha = 1.5`, `rho = 0.8`, `hop = 2`) and tests an atom-aligned target. If this figure fails, the rest of the diagnostics are not interpretable.
 
-Read the figure row-wise. For `U1`, `R²(y_u1 \mid x1)` should be near one and controls from inactive views should be near chance. For `R12`, both `x1` and `x2` should decode `y_r12`, `x3` should remain a control, and `[x1,x2]` should be best. For `R123`, all three views should decode `y_r123`, with `[x1,x2,x3]` strongest. For `S12->3`, the stable correctness criterion is `R²(y_s12_3 \mid x3)` because the synergy latent is linearly projected into view 3.
+In this section, `R²` denotes the held-out coefficient of determination of a probe model (fit on a train split, evaluated on a test split). If $\hat{y}^{\mathrm{te}}$ is the probe prediction on the test split and $y^{\mathrm{te}}$ is the corresponding target, then
+
+```math
+R^2 = 1 - \frac{\sum_n (y_n^{\mathrm{te}} - \hat{y}_n^{\mathrm{te}})^2}{\sum_n (y_n^{\mathrm{te}} - \bar{y}^{\mathrm{te}})^2},
+\qquad
+\bar{y}^{\mathrm{te}} = \frac{1}{N_{\mathrm{te}}}\sum_n y_n^{\mathrm{te}}.
+```
+
+Values near `1` indicate strong predictability, while values near `0` (or negative) indicate poor performance relative to predicting the test-set mean.
+
+The bar labels follow a strict convention: `input -> target`. For example, `x1 -> y_u1` means a probe predicts the latent-derived target `y_u1` from view `x1`, and `[x1,x2] -> y_r12` means a probe predicts `y_r12` from the concatenated views `x1` and `x2`. Labels ending in `(ctrl)` are controls and should stay near chance because that view should not carry the target information. Bars named `joint gain` or `source joint gain` are improvements over the best single-view source and are included only to show whether combining sources helps.
+
+Read the figure row-wise. For `U1`, `x1 -> y_u1` should be near one and both control bars should be near chance. For `R12`, `x1 -> y_r12` and `x2 -> y_r12` should both be high, `x3 -> y_r12 (ctrl)` should remain low, and `[x1,x2] -> y_r12` should be best. For `R123`, all three single-view bars should be high and `[x1,x2,x3] -> y_r123` should be highest. For `S12->3`, the stable correctness criterion is `x3 -> y_s` (target view), because the synergy latent is projected into view 3.
 
 | Atom-only validation set | Metric | Score | Expected behavior |
 | --- | --- | ---: | --- |

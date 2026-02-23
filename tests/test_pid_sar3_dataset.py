@@ -947,10 +947,10 @@ def test_plot_single_atom_correctness_validation():
         ]
     )
 
-    # Plot as four compact panels (one per correctness set) to avoid mixing incomparable metrics.
+    # Plot as four panels (one per correctness set) with horizontal bars for readability.
     atom_order = ["U1", "R12", "R123", "S12->3"]
     atom_rows = {a: [r for r in rows if r["atom"] == a] for a in atom_order}
-    fig, axes = plt.subplots(2, 2, figsize=(14.8, 10.6))
+    fig, axes = plt.subplots(2, 2, figsize=(15.6, 11.2))
     axes = axes.ravel()
     palette = {
         "main": "#4c78a8",
@@ -962,20 +962,14 @@ def test_plot_single_atom_correctness_validation():
     for ax, atom in zip(axes, atom_order):
         atom_metrics = atom_rows[atom]
         raw_labels = [m["metric"] for m in atom_metrics]
-        labels = []
-        for lbl in raw_labels:
-            lbl = (
-                lbl.replace("R2(", "R2(\n")
-                .replace(") control", ")\ncontrol")
-                .replace(") source single", ")\nsource single")
-                .replace(") source joint", ")\nsource joint")
-                .replace("joint gain over best single", "joint gain\nover best single")
-                .replace("source joint gain", "source joint\ngain")
-                .replace(" | [x1,x2,x3])", " |\n[x1,x2,x3])")
-                .replace(" | [x1,x2])", " |\n[x1,x2])")
-                .replace(" target decode", "\ntarget decode")
-            )
-            labels.append(lbl)
+        if atom == "U1":
+            labels = ["x1 -> y_u1", "x2 -> y_u1 (ctrl)", "x3 -> y_u1 (ctrl)"]
+        elif atom == "R12":
+            labels = ["x1 -> y_r12", "x2 -> y_r12", "x3 -> y_r12 (ctrl)", "[x1,x2] -> y_r12", "joint gain"]
+        elif atom == "R123":
+            labels = ["x1 -> y_r123", "x2 -> y_r123", "x3 -> y_r123", "[x1,x2,x3] -> y_r123", "joint gain"]
+        else:
+            labels = ["x3 -> y_s (target)", "x1 -> y_s", "x2 -> y_s", "[x1,x2] -> y_s", "source joint gain"]
         vals = np.array([m["score"] for m in atom_metrics], dtype=np.float32)
         colors = []
         for lbl in raw_labels:
@@ -990,23 +984,26 @@ def test_plot_single_atom_correctness_validation():
             else:
                 colors.append(palette["main"])
 
-        x = np.arange(len(labels))
-        ax.bar(x, vals, color=colors, alpha=0.9)
-        ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
+        y = np.arange(len(labels))
+        ax.barh(y, vals, color=colors, alpha=0.9)
+        ax.axvline(0.0, color="black", linewidth=0.8, alpha=0.6)
         ax.set_title(f"{atom} correctness set (low noise)")
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=0, ha="center", fontsize=7.5)
-        ax.grid(axis="y", alpha=0.25)
+        ax.set_yticks(y)
+        ax.set_yticklabels(labels, fontsize=8)
+        ax.set_xlabel("held-out score (R²)")
+        ax.grid(axis="x", alpha=0.25)
         for i, v in enumerate(vals):
-            ax.text(i, v + (0.015 if v >= 0 else -0.04), f"{v:.2f}", ha="center", va="bottom" if v >= 0 else "top", fontsize=7.5)
+            pad = 0.02 if v >= 0 else -0.02
+            ax.text(v + pad, i, f"{v:.2f}", va="center", ha="left" if v >= 0 else "right", fontsize=8)
+        ax.invert_yaxis()
 
         if atom in ("U1", "R12", "R123"):
-            ax.set_ylim(min(-0.15, float(np.min(vals)) - 0.05), 1.05)
+            ax.set_xlim(min(-0.18, float(np.min(vals)) - 0.06), 1.05)
         else:
-            ax.set_ylim(min(-0.25, float(np.min(vals)) - 0.05), max(1.05, float(np.max(vals)) + 0.08))
+            ax.set_xlim(min(-0.30, float(np.min(vals)) - 0.06), max(1.05, float(np.max(vals)) + 0.10))
 
     fig.suptitle("Single-atom correctness validation (low noise): atom-aligned tasks should be near-ceiling", y=0.995)
-    fig.subplots_adjust(hspace=0.50, wspace=0.22, bottom=0.12)
+    fig.subplots_adjust(hspace=0.42, wspace=0.42, left=0.12, right=0.98, bottom=0.08, top=0.93)
     _savefig(out_dir / "single_atom_correctness_validation.png")
 
     csv_path = out_dir / "single_atom_correctness_validation.csv"

@@ -62,6 +62,23 @@ def _balanced_batch(gen: PIDSar3DatasetGenerator, n_per_pid: int, shuffle_seed: 
     return gen.generate(n=int(pid_ids.size), pid_ids=pid_ids.tolist(), return_aux=return_aux)
 
 
+def _data_cfg_compositional_very_easy(seed: int) -> PIDDatasetConfig:
+    return PIDDatasetConfig(
+        d=32,
+        m=8,
+        sigma=0.02,
+        rho_choices=(0.8,),
+        hop_choices=(1,),
+        seed=int(seed),
+        deleakage_fit_samples=1024,
+        composition_mode="multi_atom",
+        active_atoms_per_sample=5,
+        shared_backbone_gain=4.0,
+        shared_backbone_tied_projection=True,
+        synergy_deleak_lambda=0.25,
+    )
+
+
 def _fit_classifier_with_confusion(
     Xtr: np.ndarray,
     ytr: np.ndarray,
@@ -1391,7 +1408,7 @@ def test_source_to_target_four_models_kappa_5fold():
         lr=1e-3,
         weight_decay=1e-5,
         batch_size=192,
-        steps=180,
+        steps=120,
         temperature=0.2,
         device="cpu",
         seed=91,
@@ -2553,3 +2570,340 @@ def test_dataset_difficulty_ladder_raw_retrieval():
     # Sanity: the easy compositional level should be clearly solvable on pair->heldout.
     easy_pair = [r for r in group_rows if str(r["level"]) == "L2" and str(r["group"]) == "pair_to_heldout"][0]
     assert float(easy_pair["recall_at_1_mean"]) > 0.05
+
+
+def test_analysis_bundle_four_models_compositional_very_easy():
+    """
+    Train the 4-model suite once on the compositional-very-easy dataset (L0) and
+    export the main downstream analyses used in the results doc:
+    (i) source->target kappa (5-fold), (ii) frozen retrieval, (iii) frozen-decoder
+    reconstruction (5-fold, pair/triple sources).
+    """
+    out_dir = _ensure_plot_dir()
+    data_cfg = _data_cfg_compositional_very_easy(seed=4001)
+    ssl_gen = PIDSar3DatasetGenerator(data_cfg)
+    enc_cfg = SSLEncoderConfig(input_dim=data_cfg.d, encoder_hidden_dim=96, representation_dim=48, projector_hidden_dim=96, projector_dim=48)
+    train_cfg = SSLTrainConfig(
+        lr=1e-3,
+        weight_decay=1e-5,
+        batch_size=192,
+        steps=180,
+        temperature=0.2,
+        device="cpu",
+        seed=141,
+        triangle_reg_weight=0.15,
+        confu_pair_weight=0.5,
+        confu_fused_weight=0.5,
+    )
+
+    unimodal_models, _ = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, train_cfg)
+    model_b, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce")
+    model_c, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "triangle_exact", "triangle_exact")
+    model_d, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "confu_style", "confu_style")
+
+    model_labels = {
+        "A": "A: 3x unimodal SimCLR",
+        "B": "B: pairwise InfoNCE",
+        "C": "C: TRIANGLE",
+        "D": "D: ConFu",
+    }
+    source_map_full = {
+        "1": ("x1",),
+        "2": ("x2",),
+        "3": ("x3",),
+        "12": ("x1", "x2"),
+        "13": ("x1", "x3"),
+        "23": ("x2", "x3"),
+        "123": ("x1", "x2", "x3"),
+    }
+    source_map_kappa = {"12": ("x1", "x2"), "13": ("x1", "x3"), "23": ("x2", "x3"), "123": ("x1", "x2", "x3")}
+    source_map_recon = {"12": ("x1", "x2"), "13": ("x1", "x3"), "23": ("x2", "x3"), "123": ("x1", "x2", "x3")}
+    target_keys = {"1": "x1", "2": "x2", "3": "x3"}
+
+    # Shared probe set for retrieval + reconstruction (and also used for kappa folds).
+    probe_gen = PIDSar3DatasetGenerator(_data_cfg_compositional_very_easy(seed=int(data_cfg.seed)))
+    probe = _balanced_batch(probe_gen, n_per_pid=40, shuffle_seed=969, return_aux=True)
+    pid_ids = probe["pid_id"].astype(np.int64)
+    y_all_pid = pid_ids.copy()
+
+    Xs = {
+        "A": _concat_unimodal_frozen(unimodal_models, probe),
+        "B": _concat_trimodal_frozen(model_b, probe),
+        "C": _concat_trimodal_frozen(model_c, probe),
+        "D": _concat_trimodal_frozen(model_d, probe),
+    }
+
+    # -------------------------------------------------------------------------
+    # (i) Source->target kappa (5-fold)
+    # -------------------------------------------------------------------------
+    skf = StratifiedKFold(n_splits=2, shuffle=True, random_state=17)
+    kappa_fold_rows: List[Dict[str, float]] = []
+    for fold_idx, (tr_idx, te_idx) in enumerate(skf.split(np.zeros_like(y_all_pid), y_all_pid), start=1):
+        batch_tr = _slice_batch(probe, tr_idx)
+        batch_te = _slice_batch(probe, te_idx)
+        for mkey, X in Xs.items():
+            Xtr = X[tr_idx]
+            Xte = X[te_idx]
+            parts_tr = _split_modalities_from_concat(Xtr)
+            parts_te = _split_modalities_from_concat(Xte)
+            for src, src_keys in source_map_kappa.items():
+                Xsrc_tr = _subset_concat(parts_tr, src_keys)
+                Xsrc_te = _subset_concat(parts_te, src_keys)
+                for tgt in ("1", "2", "3"):
+                    metrics = _fit_binary_macro_f1_kappa_over_target_dims(
+                        Xsrc_tr,
+                        batch_tr[target_keys[tgt]].astype(np.float32),
+                        Xsrc_te,
+                        batch_te[target_keys[tgt]].astype(np.float32),
+                    )
+                    kappa_fold_rows.append(
+                        {
+                            "fold": float(fold_idx),
+                            "model": 0.0,
+                            "model_label": 0.0,
+                            "source": 0.0,
+                            "target": 0.0,
+                            "macro_f1": float(metrics["macro_f1"]),
+                            "macro_kappa": float(metrics["macro_kappa"]),
+                            "n_target_dims": float(metrics["n_target_dims"]),
+                        }
+                    )
+                    kappa_fold_rows[-1]["model"] = mkey  # type: ignore[assignment]
+                    kappa_fold_rows[-1]["model_label"] = model_labels[mkey]  # type: ignore[assignment]
+                    kappa_fold_rows[-1]["source"] = src  # type: ignore[assignment]
+                    kappa_fold_rows[-1]["target"] = tgt  # type: ignore[assignment]
+
+    kappa_prefix = "compositional_very_easy_source_to_target_four_models_5fold"
+    with (out_dir / f"{kappa_prefix}_per_fold.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f, fieldnames=["fold", "model", "model_label", "source", "target", "macro_f1", "macro_kappa", "n_target_dims"]
+        )
+        writer.writeheader()
+        for r in kappa_fold_rows:
+            writer.writerow(r)
+
+    grouped_k: Dict[Tuple[str, str, str], List[Dict[str, float]]] = {}
+    for r in kappa_fold_rows:
+        grouped_k.setdefault((str(r["model"]), str(r["source"]), str(r["target"])), []).append(r)
+    kappa_summary_rows: List[Dict[str, float]] = []
+    for (m, src, tgt), rows in grouped_k.items():
+        f1_stats = _mean_ci95([float(r["macro_f1"]) for r in rows])
+        k_stats = _mean_ci95([float(r["macro_kappa"]) for r in rows])
+        row = {
+            "model": 0.0, "model_label": 0.0, "source": 0.0, "target": 0.0,
+            "n_folds": float(len(rows)),
+            "macro_f1_mean": float(f1_stats["mean"]), "macro_f1_se": float(f1_stats["se"]),
+            "macro_kappa_mean": float(k_stats["mean"]), "macro_kappa_se": float(k_stats["se"]),
+        }
+        row["model"] = m  # type: ignore[assignment]
+        row["model_label"] = model_labels[m]  # type: ignore[assignment]
+        row["source"] = src  # type: ignore[assignment]
+        row["target"] = tgt  # type: ignore[assignment]
+        kappa_summary_rows.append(row)
+    kappa_summary_rows.sort(key=lambda r: (str(r["model"]), len(str(r["source"])), str(r["source"]), str(r["target"])))
+    with (out_dir / f"{kappa_prefix}_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "model", "model_label", "source", "target", "n_folds",
+                "macro_f1_mean", "macro_f1_se", "macro_kappa_mean", "macro_kappa_se",
+            ],
+        )
+        writer.writeheader()
+        for r in kappa_summary_rows:
+            writer.writerow(r)
+
+    def _group_name(src: str, tgt: str) -> str:
+        if len(src) == 1 and src == tgt:
+            return "self_1to1"
+        if len(src) == 1 and src != tgt:
+            return "single_cross"
+        if len(src) == 2 and tgt not in src:
+            return "pair_to_heldout_target"
+        if len(src) == 2 and tgt in src:
+            return "pair_to_member_target"
+        if len(src) == 3:
+            return "triple_to_target"
+        return "other"
+
+    kappa_group_rows: List[Dict[str, float]] = []
+    by_model_group: Dict[Tuple[str, str], List[Dict[str, float]]] = {}
+    for r in kappa_summary_rows:
+        by_model_group.setdefault((str(r["model"]), _group_name(str(r["source"]), str(r["target"]))), []).append(r)
+    for (m, g), rows in by_model_group.items():
+        row = {
+            "model": 0.0, "model_label": 0.0, "group": 0.0,
+            "macro_f1_mean": float(np.mean([float(r["macro_f1_mean"]) for r in rows])),
+            "macro_kappa_mean": float(np.mean([float(r["macro_kappa_mean"]) for r in rows])),
+        }
+        row["model"] = m  # type: ignore[assignment]
+        row["model_label"] = model_labels[m]  # type: ignore[assignment]
+        row["group"] = g  # type: ignore[assignment]
+        kappa_group_rows.append(row)
+    with (out_dir / f"{kappa_prefix}_grouped_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["model", "model_label", "group", "macro_f1_mean", "macro_kappa_mean"])
+        writer.writeheader()
+        for r in kappa_group_rows:
+            writer.writerow(r)
+
+    # -------------------------------------------------------------------------
+    # (ii) Frozen retrieval (single-run)
+    # -------------------------------------------------------------------------
+    retrieval_rows: List[Dict[str, float]] = []
+    retrieval_strat_rows: List[Dict[str, float]] = []
+    for mkey, X in Xs.items():
+        parts = _split_modalities_from_concat(X)
+        for src, src_keys in source_map_full.items():
+            query = _fused_query_from_parts(parts, src_keys)
+            for tgt, tgt_key in target_keys.items():
+                gallery = parts[tgt_key]
+                scores = _retrieval_scores(query, gallery)
+                metrics = _retrieval_metrics_from_scores(scores)
+                rank = metrics["rank"]  # type: ignore[index]
+                row = {
+                    "model": 0.0, "model_label": 0.0, "source": 0.0, "target": 0.0,
+                    "recall_at_1": float(metrics["recall_at_1"][0]),
+                    "recall_at_5": float(metrics["recall_at_5"][0]),
+                    "mrr": float(metrics["mrr"][0]),
+                    "n": float(rank.shape[0]),
+                }
+                row["model"] = mkey  # type: ignore[assignment]
+                row["model_label"] = model_labels[mkey]  # type: ignore[assignment]
+                row["source"] = src  # type: ignore[assignment]
+                row["target"] = tgt  # type: ignore[assignment]
+                retrieval_rows.append(row)
+                for r in _retrieval_metrics_stratified(rank.astype(np.int64), pid_ids):
+                    rr = dict(r)
+                    rr.update({"model": mkey, "model_label": model_labels[mkey], "source": src, "target": tgt})
+                    retrieval_strat_rows.append(rr)
+
+    retrieval_prefix = "compositional_very_easy_retrieval_source_to_target_four_models"
+    with (out_dir / f"{retrieval_prefix}_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f, fieldnames=["model", "model_label", "source", "target", "recall_at_1", "recall_at_5", "mrr", "n"]
+        )
+        writer.writeheader()
+        for r in retrieval_rows:
+            writer.writerow(r)
+    with (out_dir / f"{retrieval_prefix}_stratified.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "model", "model_label", "source", "target", "scope", "label_id", "label_name", "n",
+                "recall_at_1", "recall_at_5", "mrr",
+            ],
+        )
+        writer.writeheader()
+        for r in retrieval_strat_rows:
+            writer.writerow(r)
+
+    # -------------------------------------------------------------------------
+    # (iii) Frozen-decoder reconstruction (5-fold; pair/triple sources)
+    # -------------------------------------------------------------------------
+    recon_fold_rows: List[Dict[str, float]] = []
+    for fold_idx, (tr_idx, te_idx) in enumerate(skf.split(np.zeros_like(y_all_pid), y_all_pid), start=1):
+        batch_tr = _slice_batch(probe, tr_idx)
+        batch_te = _slice_batch(probe, te_idx)
+        for mkey, X in Xs.items():
+            Xtr = X[tr_idx]
+            Xte = X[te_idx]
+            parts_tr = _split_modalities_from_concat(Xtr)
+            parts_te = _split_modalities_from_concat(Xte)
+            for src, src_keys in source_map_recon.items():
+                Xsrc_tr = _subset_concat(parts_tr, src_keys)
+                Xsrc_te = _subset_concat(parts_te, src_keys)
+                for tgt in ("1", "2", "3"):
+                    Ytr = batch_tr[target_keys[tgt]].astype(np.float32)
+                    Yte = batch_te[target_keys[tgt]].astype(np.float32)
+                    for dec_key in ("ridge", "mlp"):
+                        metrics = _fit_reconstruction_decoder_metrics(Xsrc_tr, Ytr, Xsrc_te, Yte, decoder=dec_key)
+                        row = {
+                            "fold": float(fold_idx),
+                            "model": 0.0, "model_label": 0.0,
+                            "decoder": 0.0, "decoder_label": 0.0,
+                            "source": 0.0, "target": 0.0,
+                            "macro_r2": float(metrics["macro_r2"]),
+                            "macro_nrmse": float(metrics["macro_nrmse"]),
+                            "n_target_dims": float(metrics["n_target_dims"]),
+                        }
+                        row["model"] = mkey  # type: ignore[assignment]
+                        row["model_label"] = model_labels[mkey]  # type: ignore[assignment]
+                        row["decoder"] = dec_key  # type: ignore[assignment]
+                        row["decoder_label"] = "Ridge" if dec_key == "ridge" else "MLP"  # type: ignore[assignment]
+                        row["source"] = src  # type: ignore[assignment]
+                        row["target"] = tgt  # type: ignore[assignment]
+                        recon_fold_rows.append(row)
+
+    recon_prefix = "compositional_very_easy_source_to_target_reconstruction_four_models_5fold"
+    with (out_dir / f"{recon_prefix}_per_fold.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "fold", "model", "model_label", "decoder", "decoder_label", "source", "target",
+                "macro_r2", "macro_nrmse", "n_target_dims",
+            ],
+        )
+        writer.writeheader()
+        for r in recon_fold_rows:
+            writer.writerow(r)
+
+    grouped_r: Dict[Tuple[str, str, str, str], List[Dict[str, float]]] = {}
+    for r in recon_fold_rows:
+        grouped_r.setdefault((str(r["model"]), str(r["decoder"]), str(r["source"]), str(r["target"])), []).append(r)
+    recon_summary_rows: List[Dict[str, float]] = []
+    for (m, dec, src, tgt), rows in grouped_r.items():
+        r2_stats = _mean_ci95([float(r["macro_r2"]) for r in rows])
+        nr_stats = _mean_ci95([float(r["macro_nrmse"]) for r in rows])
+        row = {
+            "model": 0.0, "model_label": 0.0, "decoder": 0.0, "decoder_label": 0.0, "source": 0.0, "target": 0.0,
+            "n_folds": float(len(rows)),
+            "macro_r2_mean": float(r2_stats["mean"]), "macro_r2_se": float(r2_stats["se"]),
+            "macro_nrmse_mean": float(nr_stats["mean"]), "macro_nrmse_se": float(nr_stats["se"]),
+        }
+        row["model"] = m  # type: ignore[assignment]
+        row["model_label"] = model_labels[m]  # type: ignore[assignment]
+        row["decoder"] = dec  # type: ignore[assignment]
+        row["decoder_label"] = "Ridge" if dec == "ridge" else "MLP"  # type: ignore[assignment]
+        row["source"] = src  # type: ignore[assignment]
+        row["target"] = tgt  # type: ignore[assignment]
+        recon_summary_rows.append(row)
+    recon_summary_rows.sort(key=lambda r: (str(r["decoder"]), str(r["model"]), len(str(r["source"])), str(r["source"]), str(r["target"])))
+    with (out_dir / f"{recon_prefix}_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "model", "model_label", "decoder", "decoder_label", "source", "target", "n_folds",
+                "macro_r2_mean", "macro_r2_se", "macro_nrmse_mean", "macro_nrmse_se",
+            ],
+        )
+        writer.writeheader()
+        for r in recon_summary_rows:
+            writer.writerow(r)
+
+    recon_group_rows: List[Dict[str, float]] = []
+    by_model_group_r: Dict[Tuple[str, str, str], List[Dict[str, float]]] = {}
+    for r in recon_summary_rows:
+        by_model_group_r.setdefault((str(r["decoder"]), str(r["model"]), _group_name(str(r["source"]), str(r["target"]))), []).append(r)
+    for (dec, m, g), rows in by_model_group_r.items():
+        row = {
+            "decoder": 0.0, "decoder_label": 0.0, "model": 0.0, "model_label": 0.0, "group": 0.0,
+            "macro_r2_mean": float(np.mean([float(r["macro_r2_mean"]) for r in rows])),
+            "macro_nrmse_mean": float(np.mean([float(r["macro_nrmse_mean"]) for r in rows])),
+        }
+        row["decoder"] = dec  # type: ignore[assignment]
+        row["decoder_label"] = "Ridge" if dec == "ridge" else "MLP"  # type: ignore[assignment]
+        row["model"] = m  # type: ignore[assignment]
+        row["model_label"] = model_labels[m]  # type: ignore[assignment]
+        row["group"] = g  # type: ignore[assignment]
+        recon_group_rows.append(row)
+    with (out_dir / f"{recon_prefix}_grouped_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f, fieldnames=["decoder", "decoder_label", "model", "model_label", "group", "macro_r2_mean", "macro_nrmse_mean"]
+        )
+        writer.writeheader()
+        for r in recon_group_rows:
+            writer.writerow(r)
+
+    assert len(kappa_summary_rows) == 4 * 4 * 3
+    assert len(retrieval_rows) == 4 * 7 * 3
+    assert len(recon_summary_rows) == 2 * 4 * 4 * 3

@@ -86,9 +86,9 @@ This section is ordered by evidential value for validating the generator. First 
 
 *Figure 1A. Single-atom correctness validation with logistic-regression probes (AUROC).* The left 2x2 block uses low noise (`sigma = 0.05`) and the right 2x2 block uses higher noise (`sigma = 0.45`), with `alpha = 1.5`, `rho = 0.8`, and `hop = 2` fixed. Each panel corresponds to one atom-only dataset (`U1`, `R12`, `R123`, `S12->3`) and reports atom-aligned held-out classification scores.
 
-![Single-atom correctness validation (small MLP)](test_outputs/pid_sar3/single_atom_correctness_validation_mlp.png)
+![Single-atom correctness validation (stronger MLP)](test_outputs/pid_sar3/single_atom_correctness_validation_mlp.png)
 
-*Figure 1B. Single-atom correctness validation with a small supervised MLP probe (AUROC).* The panel layout and noise settings are identical to Figure 1A, which allows direct comparison between a linear classifier and a small nonlinear probe.
+*Figure 1B. Single-atom correctness validation with a stronger supervised MLP probe (AUROC).* The panel layout and noise settings are identical to Figure 1A, which allows direct comparison between a linear classifier and a higher-capacity nonlinear probe.
 
 These are the primary validation figures. If the low-noise block fails in either Figure 1A or Figure 1B, the rest of the diagnostics are not interpretable. The higher-noise block is included to show degradation under noisier observations without changing the task definition.
 
@@ -99,11 +99,15 @@ Table 1 summarizes a compact subset of the AUROC results shown in Figures 1A and
 | Noise | Probe | `U1: x1->u1` | `U1 ctrl: x2->u1` | `R12: [x1,x2]->r12` | `R123: [x123]->r123` | `S12->3: x3->s` | `S12->3: [x1,x2]->s` |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | low (`sigma=0.05`) | logistic | 0.998 | 0.469 | 0.966 | 0.968 | 0.992 | 0.509 |
-| low (`sigma=0.05`) | small MLP | 0.998 | 0.547 | 0.956 | 0.953 | 0.988 | 0.509 |
+| low (`sigma=0.05`) | stronger MLP | 0.997 | 0.508 | 0.967 | 0.963 | 0.952 | 0.574 |
+| low (`sigma=0.05`) | RBF-SVM | 0.997 | 0.468 | 0.958 | 0.963 | 0.965 | 0.670 |
+| low (`sigma=0.05`) | XGBoost | n/a | n/a | n/a | n/a | n/a | n/a |
 | higher (`sigma=0.45`) | logistic | 0.967 | 0.537 | 0.912 | 0.944 | 0.736 | 0.568 |
-| higher (`sigma=0.45`) | small MLP | 0.957 | 0.522 | 0.897 | 0.940 | 0.686 | 0.532 |
+| higher (`sigma=0.45`) | stronger MLP | 0.961 | 0.538 | 0.931 | 0.947 | 0.755 | 0.519 |
+| higher (`sigma=0.45`) | RBF-SVM | 0.947 | 0.509 | 0.938 | 0.946 | 0.642 | 0.583 |
+| higher (`sigma=0.45`) | XGBoost | n/a | n/a | n/a | n/a | n/a | n/a |
 
-Table 1 should be read together with Figures 1A and 1B. Aligned probes remain high for `U1`, `R12`, and `R123`, control probes remain near chance (`AUROC ≈ 0.5`), and `x3 -> s` is the stable correctness probe for `S12->3`. Increasing noise degrades aligned probes without changing these qualitative roles.
+Table 1 should be read together with Figures 1A and 1B. Aligned probes remain high for `U1`, `R12`, and `R123`, control probes remain near chance (`AUROC ≈ 0.5`), and `x3 -> s` is the stable correctness probe for `S12->3`. Increasing noise degrades aligned probes without changing these qualitative roles. In this environment, `xgboost` is not installed, so the XGBoost rows are reported as `n/a`.
 
 For completeness, the table below reports low-noise held-out regression performance using `R²`. In this section, `R²` denotes the held-out coefficient of determination of a probe model (fit on a train split, evaluated on a test split). If $\hat{y}^{\mathrm{te}}$ is the probe prediction on the test split and $y^{\mathrm{te}}$ is the corresponding target, then
 

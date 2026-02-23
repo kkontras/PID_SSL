@@ -35,21 +35,21 @@ S12->3,logreg:x1->y_s,0.490078
 S12->3,logreg:x2->y_s,0.530756
 S12->3,logreg:[x1,x2]->y_s,0.508932
 S12->3,logreg:source joint gain,-0.021823
-U1,mlp:x1->y_u1,0.999043
-U1,mlp:x2->y_u1 ctrl,0.465755
-U1,mlp:x3->y_u1 ctrl,0.441804
-R12,mlp:x1->y_r12,0.935399
-R12,mlp:x2->y_r12,0.920337
-R12,mlp:x3->y_r12 ctrl,0.505046
-R12,mlp:[x1,x2]->y_r12,0.957499
-R12,mlp:joint gain,0.022099
-R123,mlp:x1->y_r123,0.916315
-R123,mlp:x2->y_r123,0.940194
-R123,mlp:x3->y_r123,0.922929
-R123,mlp:[x1,x2,x3]->y_r123,0.960191
-R123,mlp:joint gain,0.019998
-S12->3,mlp:x3->y_s target,0.961683
-S12->3,mlp:x1->y_s,0.541711
-S12->3,mlp:x2->y_s,0.492838
-S12->3,mlp:[x1,x2]->y_s,0.490703
-S12->3,mlp:source joint gain,-0.051008
+U1,mlp:x1->y_u1,0.996913
+U1,mlp:x2->y_u1 ctrl,0.508256
+U1,mlp:x3->y_u1 ctrl,0.426958
+R12,mlp:x1->y_r12,0.940245
+R12,mlp:x2->y_r12,0.932004
+R12,mlp:x3->y_r12 ctrl,0.497824
+R12,mlp:[x1,x2]->y_r12,0.967190
+R12,mlp:joint gain,0.026945
+R123,mlp:x1->y_r123,0.909608
+R123,mlp:x2->y_r123,0.936281
+R123,mlp:x3->y_r123,0.931002
+R123,mlp:[x1,x2,x3]->y_r123,0.962551
+R123,mlp:joint gain,0.026270
+S12->3,mlp:x3->y_s target,0.952256
+S12->3,mlp:x1->y_s,0.556103
+S12->3,mlp:x2->y_s,0.470789
+S12->3,mlp:[x1,x2]->y_s,0.573951
+S12->3,mlp:source joint gain,0.017848

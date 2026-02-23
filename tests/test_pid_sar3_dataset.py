@@ -16,6 +16,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
+
+try:
+    from xgboost import XGBClassifier  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    XGBClassifier = None
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -192,18 +198,70 @@ def _mlp_auroc_scalar(X: np.ndarray, y: np.ndarray, seed: int = 0) -> float:
     scaler = StandardScaler()
     Xtr_s = scaler.fit_transform(Xtr)
     Xte_s = scaler.transform(Xte)
+    # Stronger supervised probe than the earlier "small MLP":
+    # deeper network, early stopping, and adaptive optimization. This is still
+    # lightweight enough to run inside the plotting tests.
     clf = MLPClassifier(
-        hidden_layer_sizes=(32,),
+        hidden_layer_sizes=(128, 64),
         activation="relu",
-        alpha=1e-4,
-        learning_rate_init=1e-3,
-        max_iter=250,
+        solver="adam",
+        alpha=5e-5,
+        batch_size=128,
+        learning_rate="adaptive",
+        learning_rate_init=2e-3,
+        early_stopping=True,
+        validation_fraction=0.15,
+        n_iter_no_change=20,
+        max_iter=500,
         random_state=seed,
     )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
         clf.fit(Xtr_s, ztr)
     p = clf.predict_proba(Xte_s)[:, 1]
+    return float(roc_auc_score(zte, p))
+
+
+def _rbf_svm_auroc_scalar(X: np.ndarray, y: np.ndarray, seed: int = 0) -> float:
+    z = _binary_target_from_scalar(y)
+    Xtr, Ztr, Xte, Zte = _split_train_test(X, z.reshape(-1, 1))
+    ztr = Ztr.ravel().astype(int)
+    zte = Zte.ravel().astype(int)
+    if len(np.unique(ztr)) < 2 or len(np.unique(zte)) < 2:
+        return 0.5
+    scaler = StandardScaler()
+    Xtr_s = scaler.fit_transform(Xtr)
+    Xte_s = scaler.transform(Xte)
+    clf = SVC(C=2.0, kernel="rbf", gamma="scale", probability=False, random_state=seed)
+    clf.fit(Xtr_s, ztr)
+    score = clf.decision_function(Xte_s)
+    return float(roc_auc_score(zte, score))
+
+
+def _xgboost_auroc_scalar(X: np.ndarray, y: np.ndarray, seed: int = 0) -> float:
+    if XGBClassifier is None:
+        return float("nan")
+    z = _binary_target_from_scalar(y)
+    Xtr, Ztr, Xte, Zte = _split_train_test(X, z.reshape(-1, 1))
+    ztr = Ztr.ravel().astype(int)
+    zte = Zte.ravel().astype(int)
+    if len(np.unique(ztr)) < 2 or len(np.unique(zte)) < 2:
+        return 0.5
+    clf = XGBClassifier(
+        n_estimators=150,
+        max_depth=4,
+        learning_rate=0.08,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        reg_lambda=1.0,
+        objective="binary:logistic",
+        eval_metric="auc",
+        random_state=seed,
+        n_jobs=1,
+        verbosity=0,
+    )
+    clf.fit(Xtr, ztr)
+    p = clf.predict_proba(Xte)[:, 1]
     return float(roc_auc_score(zte, p))
 
 
@@ -1194,8 +1252,55 @@ def test_plot_single_atom_correctness_validation():
     _plot_cls_block(
         "mlp",
         "single_atom_correctness_validation_mlp.png",
-        "Single-atom correctness validation: small supervised MLP probes (AUROC)",
+        "Single-atom correctness validation: stronger supervised MLP probes (AUROC)",
     )
+
+    # Additional nonlinear baselines for the AUROC summary table only (not plotted).
+    def _collect_extra_probe_table_rows(sigma: float, seed: int, probe_name: str) -> Dict[str, float]:
+        cfg = PIDDatasetConfig(
+            d=32,
+            m=8,
+            sigma=sigma,
+            alpha_min=1.5,
+            alpha_max=1.5,
+            rho_choices=(0.8,),
+            hop_choices=(2,),
+            seed=seed,
+            deleakage_fit_samples=1536,
+        )
+        gen = PIDSar3DatasetGenerator(cfg)
+        fn = _rbf_svm_auroc_scalar if probe_name == "rbf_svm" else _xgboost_auroc_scalar
+        res: Dict[str, float] = {}
+
+        b = gen.generate(n=1200, pid_ids=[0] * 1200, return_aux=True)
+        y = b["y_u1"]
+        res["U1_x1"] = fn(b["x1"], y, seed=seed + 1)
+        res["U1_x2_ctrl"] = fn(b["x2"], y, seed=seed + 2)
+
+        b = gen.generate(n=1200, pid_ids=[3] * 1200, return_aux=True)
+        y = b["y_r12"]
+        res["R12_x12"] = fn(np.concatenate([b["x1"], b["x2"]], axis=1), y, seed=seed + 3)
+
+        b = gen.generate(n=1200, pid_ids=[6] * 1200, return_aux=True)
+        y = b["y_r123"]
+        res["R123_x123"] = fn(np.concatenate([b["x1"], b["x2"], b["x3"]], axis=1), y, seed=seed + 4)
+
+        b = gen.generate(n=1600, pid_ids=[7] * 1600, return_aux=True)
+        y = b["y_s12_3"]
+        res["S_x3"] = fn(b["x3"], y, seed=seed + 5)
+        res["S_x12"] = fn(np.concatenate([b["x1"], b["x2"]], axis=1), y, seed=seed + 6)
+        return res
+
+    extra_probe_summary = {
+        "rbf_svm": {
+            "low": _collect_extra_probe_table_rows(0.05, 4300, "rbf_svm"),
+            "high": _collect_extra_probe_table_rows(0.45, 4301, "rbf_svm"),
+        },
+        "xgboost": {
+            "low": _collect_extra_probe_table_rows(0.05, 5300, "xgboost"),
+            "high": _collect_extra_probe_table_rows(0.45, 5301, "xgboost"),
+        },
+    }
 
     csv_path = out_dir / "single_atom_correctness_validation.csv"
     with csv_path.open("w", encoding="utf-8") as f:
@@ -1206,6 +1311,36 @@ def test_plot_single_atom_correctness_validation():
         for probe_key in ("logreg", "mlp"):
             for r in cls_rows[probe_key]["low"]:
                 f.write(f"{r['atom']},{probe_key}:{r['metric']},{r['score']:.6f}\n")
+
+    summary_csv = out_dir / "single_atom_correctness_validation_auroc_summary.csv"
+    with summary_csv.open("w", encoding="utf-8") as f:
+        f.write("noise,probe,U1_x1,U1_x2_ctrl,R12_x12,R123_x123,S_x3,S_x12\n")
+
+        def _write_row(noise_label: str, probe_label: str, d: Dict[str, float]) -> None:
+            vals = [d["U1_x1"], d["U1_x2_ctrl"], d["R12_x12"], d["R123_x123"], d["S_x3"], d["S_x12"]]
+            out = []
+            for v in vals:
+                out.append("n/a" if not np.isfinite(v) else f"{v:.6f}")
+            f.write(f"{noise_label},{probe_label},{','.join(out)}\n")
+
+        # Existing plotted probes
+        for noise_label, cond in [("low", "low"), ("higher", "high")]:
+            for probe_label in ("logreg", "mlp"):
+                d = {r["metric"]: r["score"] for r in cls_rows[probe_label][cond]}
+                _write_row(
+                    noise_label,
+                    probe_label,
+                    {
+                        "U1_x1": d["x1->y_u1"],
+                        "U1_x2_ctrl": d["x2->y_u1 ctrl"],
+                        "R12_x12": d["[x1,x2]->y_r12"],
+                        "R123_x123": d["[x1,x2,x3]->y_r123"],
+                        "S_x3": d["x3->y_s target"],
+                        "S_x12": d["[x1,x2]->y_s"],
+                    },
+                )
+            _write_row(noise_label, "rbf_svm", extra_probe_summary["rbf_svm"][cond])
+            _write_row(noise_label, "xgboost", extra_probe_summary["xgboost"][cond])
 
     # Near-ceiling correctness expectations (thresholds chosen to be robust across seeds in low-noise mode).
     assert checks_low["u1_x1"] > 0.90

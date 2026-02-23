@@ -381,8 +381,10 @@ def test_plot_fused_confusions_two_models():
         deleakage_fit_samples=1024,
     )
     ssl_gen = PIDSar3DatasetGenerator(data_cfg)
-    probe_train_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": 1202}))
-    probe_test_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": 1203}))
+    # Important: keep the same dataset seed across train/test probe generators so
+    # fixed projections/synergy maps are shared; only sampled examples differ.
+    probe_train_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": data_cfg.seed}))
+    probe_test_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": data_cfg.seed}))
     probe_train = _balanced_batch(probe_train_gen, n_per_pid=360, shuffle_seed=31, return_aux=True)
     probe_test = _balanced_batch(probe_test_gen, n_per_pid=160, shuffle_seed=32, return_aux=True)
 
@@ -576,8 +578,9 @@ def test_plot_fused_confusions_four_models_higher_order():
         deleakage_fit_samples=1024,
     )
     ssl_gen = PIDSar3DatasetGenerator(data_cfg)
-    probe_train_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": 1402}))
-    probe_test_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": 1403}))
+    # Same fixed generator world for training and probe splits (shared projections/deleakage maps).
+    probe_train_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": data_cfg.seed}))
+    probe_test_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": data_cfg.seed}))
     probe_train = _balanced_batch(probe_train_gen, n_per_pid=340, shuffle_seed=41, return_aux=True)
     probe_test = _balanced_batch(probe_test_gen, n_per_pid=160, shuffle_seed=42, return_aux=True)
 

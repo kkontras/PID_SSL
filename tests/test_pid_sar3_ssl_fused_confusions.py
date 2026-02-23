@@ -474,6 +474,46 @@ def _retrieval_metrics_stratified(rank: np.ndarray, pid_ids: np.ndarray) -> List
     return rows
 
 
+def _retrieval_metrics_from_rank_subset(rank: np.ndarray, mask: np.ndarray) -> Dict[str, float]:
+    m = mask.astype(bool)
+    if int(np.sum(m)) == 0:
+        return {"n": 0.0, "recall_at_1": float("nan"), "recall_at_5": float("nan"), "mrr": float("nan")}
+    rk = rank[m].astype(np.float64)
+    return {
+        "n": float(rk.size),
+        "recall_at_1": float(np.mean(rk <= 1)),
+        "recall_at_5": float(np.mean(rk <= 5)),
+        "mrr": float(np.mean(1.0 / rk)),
+    }
+
+
+def _applicable_pid_ids_for_pair_to_target(source: str, target: str) -> np.ndarray:
+    """
+    PID atoms considered applicable for pair->heldout target prediction in the
+    single-atom generator. A task is applicable if the target view receives
+    signal that is a function of latents present in the source pair.
+    """
+    if len(source) != 2 or len(target) != 1 or target in source:
+        raise ValueError(f"Applicability map is only defined for pair->heldout tasks, got {source}->{target}")
+    sset = set(int(c) for c in source)
+    t = int(target)
+    out: List[int] = []
+    # Pairwise redundancies Rij are applicable iff target participates in the pair.
+    red_pairs = {3: (1, 2), 4: (1, 3), 5: (2, 3)}
+    for pid_id, pair in red_pairs.items():
+        pset = set(pair)
+        if t in pset and len(pset & sset) >= 1:
+            out.append(pid_id)
+    # R123 is applicable for any pair->heldout task.
+    out.append(6)
+    # Directional synergy Sij->k is applicable exactly for its matching rotation.
+    syn_map = {7: ("12", "3"), 8: ("13", "2"), 9: ("23", "1")}
+    for pid_id, (src, tgt) in syn_map.items():
+        if source == src and target == tgt:
+            out.append(pid_id)
+    return np.asarray(sorted(out), dtype=np.int64)
+
+
 def _subset_concat(parts: Dict[str, np.ndarray], keys: Tuple[str, ...]) -> np.ndarray:
     return np.concatenate([parts[k] for k in keys], axis=1).astype(np.float32)
 
@@ -1925,3 +1965,151 @@ def test_source_to_target_reconstruction_four_models_5fold():
     _savefig(out_dir / "source_to_target_reconstruction_four_models_5fold_macro_r2_heatmaps.png")
 
     assert len(summary_rows) == 2 * 4 * 4 * 3
+
+
+def test_pair_to_heldout_retrieval_applicability_low_noise():
+    """
+    Low-noise pathology diagnostic for pair->heldout retrieval.
+
+    We report exact-instance retrieval on the rotated pair->heldout tasks under
+    very low observation noise, split into applicable vs non-applicable PID atoms
+    in the single-atom generator.
+    """
+    out_dir = _ensure_plot_dir()
+
+    data_cfg = PIDDatasetConfig(
+        d=32,
+        m=8,
+        sigma=0.05,  # very low noise to test whether the pathology is structural
+        rho_choices=(0.2, 0.5, 0.8),
+        hop_choices=(1, 2, 3, 4),
+        seed=3701,
+        deleakage_fit_samples=1024,
+    )
+    ssl_gen = PIDSar3DatasetGenerator(data_cfg)
+    enc_cfg = SSLEncoderConfig(input_dim=data_cfg.d, encoder_hidden_dim=96, representation_dim=48, projector_hidden_dim=96, projector_dim=48)
+    train_cfg = SSLTrainConfig(
+        lr=1e-3,
+        weight_decay=1e-5,
+        batch_size=192,
+        steps=180,
+        temperature=0.2,
+        device="cpu",
+        seed=121,
+        triangle_reg_weight=0.15,
+        confu_pair_weight=0.5,
+        confu_fused_weight=0.5,
+    )
+
+    unimodal_models, _ = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, train_cfg)
+    model_b, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce")
+    model_c, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "triangle_exact", "triangle_exact")
+    model_d, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "confu_style", "confu_style")
+
+    probe_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": data_cfg.seed}))
+    probe = _balanced_batch(probe_gen, n_per_pid=180, shuffle_seed=929, return_aux=True)
+    pid_ids = probe["pid_id"].astype(np.int64)
+
+    Xs = {
+        "RAW": _concat_raw(probe),
+        "A": _concat_unimodal_frozen(unimodal_models, probe),
+        "B": _concat_trimodal_frozen(model_b, probe),
+        "C": _concat_trimodal_frozen(model_c, probe),
+        "D": _concat_trimodal_frozen(model_d, probe),
+    }
+    model_labels = {
+        "RAW": "RAW: observations",
+        "A": "A: 3x unimodal SimCLR",
+        "B": "B: pairwise InfoNCE",
+        "C": "C: TRIANGLE",
+        "D": "D: ConFu",
+    }
+    rotations = [("23", "1"), ("13", "2"), ("12", "3")]
+
+    rows: List[Dict[str, float]] = []
+    for mkey, X in Xs.items():
+        parts = _split_modalities_from_concat(X)
+        for src, tgt in rotations:
+            query = _fused_query_from_parts(parts, tuple(f"x{k}" for k in src))
+            gallery = parts[f"x{tgt}"]
+            scores = _retrieval_scores(query, gallery)
+            metrics = _retrieval_metrics_from_scores(scores)
+            rank = metrics["rank"].astype(np.int64)  # type: ignore[index]
+
+            applicable_ids = _applicable_pid_ids_for_pair_to_target(src, tgt)
+            m_app = np.isin(pid_ids, applicable_ids)
+            m_non = ~m_app
+            split_metrics = {
+                "all": _retrieval_metrics_from_rank_subset(rank, np.ones_like(pid_ids, dtype=bool)),
+                "applicable": _retrieval_metrics_from_rank_subset(rank, m_app),
+                "non_applicable": _retrieval_metrics_from_rank_subset(rank, m_non),
+            }
+
+            for split_name, sm in split_metrics.items():
+                rows.append(
+                    {
+                        "model": 0.0,
+                        "model_label": 0.0,
+                        "source": 0.0,
+                        "target": 0.0,
+                        "split": 0.0,
+                        "n": float(sm["n"]),
+                        "recall_at_1": float(sm["recall_at_1"]),
+                        "recall_at_5": float(sm["recall_at_5"]),
+                        "mrr": float(sm["mrr"]),
+                        "random_recall_at_1": float(1.0 / rank.shape[0]),
+                        "applicable_rate": float(np.mean(m_app)),
+                    }
+                )
+                rows[-1]["model"] = mkey  # type: ignore[assignment]
+                rows[-1]["model_label"] = model_labels[mkey]  # type: ignore[assignment]
+                rows[-1]["source"] = src  # type: ignore[assignment]
+                rows[-1]["target"] = tgt  # type: ignore[assignment]
+                rows[-1]["split"] = split_name  # type: ignore[assignment]
+
+    with (out_dir / "pair_to_heldout_retrieval_applicability_low_noise.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "model",
+                "model_label",
+                "source",
+                "target",
+                "split",
+                "n",
+                "recall_at_1",
+                "recall_at_5",
+                "mrr",
+                "random_recall_at_1",
+                "applicable_rate",
+            ],
+        )
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(r)
+
+    # Compact figure: mean Recall@1 across rotations for all/applicable/non-applicable.
+    fig, axes = plt.subplots(1, 3, figsize=(15.5, 4.6), sharey=True)
+    split_order = ["all", "applicable", "non_applicable"]
+    colors = ["#7f7f7f", "#2ca02c", "#d62728"]
+    for ax, split_name, color in zip(axes, split_order, colors):
+        x = [r for r in rows if str(r["split"]) == split_name]
+        means = []
+        labels = ["RAW", "A", "B", "C", "D"]
+        for m in labels:
+            vals = [float(r["recall_at_1"]) for r in x if str(r["model"]) == m]
+            means.append(float(np.mean(vals)))
+        ax.bar(np.arange(len(labels)), means, color=color, alpha=0.85)
+        ax.axhline(float(1.0 / int(rows[0]["n"])), color="black", linestyle="--", linewidth=1.0, alpha=0.6)
+        ax.set_title(split_name.replace("_", " "))
+        ax.set_xticks(np.arange(len(labels)))
+        ax.set_xticklabels(labels)
+        ax.set_ylim(0.0, max(0.05, max(means) * 1.15))
+        ax.grid(axis="y", alpha=0.25)
+        if split_name == "all":
+            ax.set_ylabel("Recall@1")
+    fig.suptitle("Low-noise pair->heldout retrieval pathology (exact-instance, mean over rotations)", y=1.02)
+    fig.tight_layout()
+    _savefig(out_dir / "pair_to_heldout_retrieval_applicability_low_noise.png")
+
+    assert len(rows) == 5 * 3 * 3

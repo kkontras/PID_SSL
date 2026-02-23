@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import sys
+import warnings
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -12,8 +13,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.metrics import accuracy_score, cohen_kappa_score, confusion_matrix, f1_score
+from sklearn.metrics import accuracy_score, cohen_kappa_score, confusion_matrix, f1_score, r2_score
 from sklearn.model_selection import StratifiedKFold
+from sklearn.neural_network import MLPRegressor
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.preprocessing import StandardScaler
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -124,6 +127,67 @@ def _fit_binary_macro_f1_kappa_over_target_dims(
     return {
         "macro_f1": float(np.mean(f1s)),
         "macro_kappa": float(np.mean(kappas)),
+        "n_target_dims": float(d),
+    }
+
+
+def _fit_reconstruction_decoder_metrics(
+    Xtr: np.ndarray,
+    Ytr: np.ndarray,
+    Xte: np.ndarray,
+    Yte: np.ndarray,
+    decoder: str,
+) -> Dict[str, float]:
+    """
+    Frozen-feature multi-output reconstruction benchmark on raw target modality vectors.
+
+    Reports macro R^2 (mean over target dimensions) and macro normalized RMSE
+    where each dimension is normalized by the train-split standard deviation.
+    """
+    x_scaler = StandardScaler()
+    Xtr_s = x_scaler.fit_transform(Xtr)
+    Xte_s = x_scaler.transform(Xte)
+
+    if decoder == "ridge":
+        reg = Ridge(alpha=1.0)
+        reg.fit(Xtr_s, Ytr)
+        pred = reg.predict(Xte_s).astype(np.float32)
+    elif decoder == "mlp":
+        y_scaler = StandardScaler()
+        Ytr_s = y_scaler.fit_transform(Ytr)
+        reg = MLPRegressor(
+            hidden_layer_sizes=(48,),
+            activation="relu",
+            alpha=1e-4,
+            learning_rate_init=1e-3,
+            batch_size=64,
+            max_iter=60,
+            early_stopping=True,
+            validation_fraction=0.1,
+            n_iter_no_change=6,
+            random_state=0,
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=ConvergenceWarning)
+            reg.fit(Xtr_s, Ytr_s)
+        pred = y_scaler.inverse_transform(reg.predict(Xte_s)).astype(np.float32)
+    else:
+        raise ValueError(f"Unknown decoder: {decoder}")
+
+    r2s: List[float] = []
+    nrmse: List[float] = []
+    d = int(Ytr.shape[1])
+    for j in range(d):
+        ytr_j = Ytr[:, j].astype(np.float64)
+        yte_j = Yte[:, j].astype(np.float64)
+        pred_j = pred[:, j].astype(np.float64)
+        r2s.append(float(r2_score(yte_j, pred_j)))
+        scale = float(np.std(ytr_j)) + 1e-8
+        rmse = float(np.sqrt(np.mean((yte_j - pred_j) ** 2)))
+        nrmse.append(float(rmse / scale))
+    return {
+        "macro_r2": float(np.mean(r2s)),
+        "macro_nrmse": float(np.mean(nrmse)),
         "n_target_dims": float(d),
     }
 
@@ -334,6 +398,80 @@ def _slice_batch(batch: Dict[str, np.ndarray], idx: np.ndarray) -> Dict[str, np.
         else:
             out[k] = v
     return out
+
+
+def _l2_normalize_rows(X: np.ndarray) -> np.ndarray:
+    return (X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-8)).astype(np.float32)
+
+
+def _fused_query_from_parts(parts: Dict[str, np.ndarray], keys: Tuple[str, ...]) -> np.ndarray:
+    """
+    Build same-dimensional query embeddings from one or more modality embeddings.
+    For multi-source retrieval, average L2-normalized modality embeddings.
+    """
+    mats = [_l2_normalize_rows(parts[k].astype(np.float32)) for k in keys]
+    if len(mats) == 1:
+        return mats[0]
+    return _l2_normalize_rows(np.mean(np.stack(mats, axis=0), axis=0))
+
+
+def _retrieval_scores(query: np.ndarray, gallery: np.ndarray) -> np.ndarray:
+    q = _l2_normalize_rows(query.astype(np.float32))
+    g = _l2_normalize_rows(gallery.astype(np.float32))
+    return (q @ g.T).astype(np.float32)
+
+
+def _retrieval_metrics_from_scores(scores: np.ndarray) -> Dict[str, np.ndarray]:
+    """
+    Positive for query i is gallery item i (same sample index).
+    Returns per-query ranks and aggregate retrieval metrics.
+    """
+    n = int(scores.shape[0])
+    # rank of the positive among descending scores
+    pos = np.arange(n, dtype=np.int64)
+    pos_scores = scores[pos, pos][:, None]
+    better = np.sum(scores > pos_scores, axis=1).astype(np.int64)
+    # break ties pessimistically by counting equal scores excluding self
+    ties = np.sum(scores == pos_scores, axis=1).astype(np.int64) - 1
+    rank = better + np.maximum(ties, 0) + 1  # 1-based rank
+    r1 = float(np.mean(rank <= 1))
+    r5 = float(np.mean(rank <= 5))
+    mrr = float(np.mean(1.0 / rank.astype(np.float64)))
+    return {
+        "rank": rank,
+        "recall_at_1": np.array([r1], dtype=np.float32),
+        "recall_at_5": np.array([r5], dtype=np.float32),
+        "mrr": np.array([mrr], dtype=np.float32),
+    }
+
+
+def _retrieval_metrics_stratified(rank: np.ndarray, pid_ids: np.ndarray) -> List[Dict[str, float]]:
+    rows: List[Dict[str, float]] = []
+    fam_ids = family_from_pid_ids(pid_ids.astype(np.int64))
+    for scope, labels, names in [
+        ("family", np.arange(3, dtype=np.int64), FAMILY_NAMES),
+        ("pid", np.arange(10, dtype=np.int64), PID_NAMES),
+    ]:
+        y = fam_ids if scope == "family" else pid_ids.astype(np.int64)
+        for lab, name in zip(labels, names):
+            m = y == int(lab)
+            if not np.any(m):
+                continue
+            rk = rank[m].astype(np.float64)
+            rows.append(
+                {
+                    "scope": 0.0,  # placeholders for typed dict
+                    "label_id": float(lab),
+                    "label_name": 0.0,
+                    "n": float(rk.size),
+                    "recall_at_1": float(np.mean(rk <= 1)),
+                    "recall_at_5": float(np.mean(rk <= 5)),
+                    "mrr": float(np.mean(1.0 / rk)),
+                }
+            )
+            rows[-1]["scope"] = scope  # type: ignore[assignment]
+            rows[-1]["label_name"] = name  # type: ignore[assignment]
+    return rows
 
 
 def _subset_concat(parts: Dict[str, np.ndarray], keys: Tuple[str, ...]) -> np.ndarray:
@@ -1382,3 +1520,408 @@ def test_source_to_target_four_models_kappa_5fold():
             writer.writerow(r)
 
     assert len(summary_rows) == 4 * 7 * 3
+
+
+def test_retrieval_source_to_target_four_models():
+    """
+    PID-stratified cross-modal retrieval benchmark on frozen embeddings.
+
+    Query embeddings are built from source subsets by averaging normalized modality
+    embeddings (same embedding dimensionality), and retrieval is performed against
+    the target modality gallery using cosine similarity.
+    """
+    out_dir = _ensure_plot_dir()
+
+    data_cfg = PIDDatasetConfig(
+        d=32,
+        m=8,
+        sigma=0.45,
+        rho_choices=(0.2, 0.5, 0.8),
+        hop_choices=(1, 2, 3, 4),
+        seed=3501,
+        deleakage_fit_samples=1024,
+    )
+    ssl_gen = PIDSar3DatasetGenerator(data_cfg)
+    enc_cfg = SSLEncoderConfig(input_dim=data_cfg.d, encoder_hidden_dim=96, representation_dim=48, projector_hidden_dim=96, projector_dim=48)
+    train_cfg = SSLTrainConfig(
+        lr=1e-3,
+        weight_decay=1e-5,
+        batch_size=192,
+        steps=180,
+        temperature=0.2,
+        device="cpu",
+        seed=101,
+        triangle_reg_weight=0.15,
+        confu_pair_weight=0.5,
+        confu_fused_weight=0.5,
+    )
+
+    # Train once (same-world SSL), evaluate retrieval on held-out probe samples.
+    unimodal_models, _ = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, train_cfg)
+    model_b, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce")
+    model_c, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "triangle_exact", "triangle_exact")
+    model_d, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "confu_style", "confu_style")
+
+    probe_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": data_cfg.seed}))
+    probe = _balanced_batch(probe_gen, n_per_pid=180, shuffle_seed=909, return_aux=True)
+    pid_ids = probe["pid_id"].astype(np.int64)
+
+    Xs = {
+        "A": _concat_unimodal_frozen(unimodal_models, probe),
+        "B": _concat_trimodal_frozen(model_b, probe),
+        "C": _concat_trimodal_frozen(model_c, probe),
+        "D": _concat_trimodal_frozen(model_d, probe),
+    }
+    model_labels = {
+        "A": "A: 3x unimodal SimCLR",
+        "B": "B: pairwise InfoNCE",
+        "C": "C: TRIANGLE",
+        "D": "D: ConFu",
+    }
+    source_map = {
+        "1": ("x1",),
+        "2": ("x2",),
+        "3": ("x3",),
+        "12": ("x1", "x2"),
+        "13": ("x1", "x3"),
+        "23": ("x2", "x3"),
+        "123": ("x1", "x2", "x3"),
+    }
+    target_keys = {"1": "x1", "2": "x2", "3": "x3"}
+
+    pair_rows: List[Dict[str, float]] = []
+    strat_rows: List[Dict[str, float]] = []
+    for mkey, X in Xs.items():
+        parts = _split_modalities_from_concat(X)
+        for src, src_keys in source_map.items():
+            query = _fused_query_from_parts(parts, src_keys)
+            for tgt, tgt_key in target_keys.items():
+                gallery = parts[tgt_key]
+                scores = _retrieval_scores(query, gallery)
+                metrics = _retrieval_metrics_from_scores(scores)
+                rank = metrics["rank"]  # type: ignore[index]
+                pair_rows.append(
+                    {
+                        "model": 0.0,
+                        "model_label": 0.0,
+                        "source": 0.0,
+                        "target": 0.0,
+                        "recall_at_1": float(metrics["recall_at_1"][0]),
+                        "recall_at_5": float(metrics["recall_at_5"][0]),
+                        "mrr": float(metrics["mrr"][0]),
+                        "n": float(rank.shape[0]),
+                    }
+                )
+                pair_rows[-1]["model"] = mkey  # type: ignore[assignment]
+                pair_rows[-1]["model_label"] = model_labels[mkey]  # type: ignore[assignment]
+                pair_rows[-1]["source"] = src  # type: ignore[assignment]
+                pair_rows[-1]["target"] = tgt  # type: ignore[assignment]
+
+                for r in _retrieval_metrics_stratified(rank.astype(np.int64), pid_ids):
+                    rr = dict(r)
+                    rr.update({"model": mkey, "model_label": model_labels[mkey], "source": src, "target": tgt})
+                    strat_rows.append(rr)
+
+    with (out_dir / "retrieval_source_to_target_four_models_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["model", "model_label", "source", "target", "recall_at_1", "recall_at_5", "mrr", "n"],
+        )
+        writer.writeheader()
+        for r in pair_rows:
+            writer.writerow(r)
+
+    with (out_dir / "retrieval_source_to_target_four_models_stratified.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "model",
+                "model_label",
+                "source",
+                "target",
+                "scope",
+                "label_id",
+                "label_name",
+                "n",
+                "recall_at_1",
+                "recall_at_5",
+                "mrr",
+            ],
+        )
+        writer.writeheader()
+        for r in strat_rows:
+            writer.writerow(r)
+
+    # Compact heatmap for main source->target retrieval summary (Recall@1 by default).
+    fig, axes = plt.subplots(2, 2, figsize=(16.5, 12.0))
+    src_order = ["12", "13", "23", "123"]
+    tgt_order = ["1", "2", "3"]
+    for ax, mkey in zip(axes.flat, ["A", "B", "C", "D"]):
+        row_map = {(str(r["source"]), str(r["target"])): r for r in pair_rows if str(r["model"]) == mkey}
+        mat = np.array([[float(row_map[(s, t)]["recall_at_1"]) for t in tgt_order] for s in src_order], dtype=np.float32)
+        im = ax.imshow(mat, aspect="auto", cmap="YlGnBu", vmin=0.0, vmax=1.0)
+        ax.set_title(model_labels[mkey])
+        ax.set_xticks(range(len(tgt_order)))
+        ax.set_xticklabels([f"target {t}" for t in tgt_order])
+        ax.set_yticks(range(len(src_order)))
+        ax.set_yticklabels([f"src {s}" for s in src_order])
+        for i in range(mat.shape[0]):
+            for j in range(mat.shape[1]):
+                ax.text(j, i, f"{mat[i,j]:.2f}", ha="center", va="center", color="black", fontsize=7)
+    fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.02, pad=0.02)
+    fig.suptitle("Frozen-embedding source->target retrieval (Recall@1)", y=0.99)
+    fig.subplots_adjust(wspace=0.25, hspace=0.28)
+    _savefig(out_dir / "retrieval_source_to_target_four_models_recall1_heatmaps.png")
+
+    assert len(pair_rows) == 4 * 7 * 3
+
+
+def test_source_to_target_reconstruction_four_models_5fold():
+    """
+    Frozen-encoder source->target reconstruction with multi-output decoders.
+
+    We compare a linear decoder (Ridge) and a nonlinear decoder (MLP) on the same
+    5-fold source->target grid used for the kappa benchmark, reporting macro R^2
+    and macro normalized RMSE over target dimensions.
+    """
+    out_dir = _ensure_plot_dir()
+
+    data_cfg = PIDDatasetConfig(
+        d=32,
+        m=8,
+        sigma=0.45,
+        rho_choices=(0.2, 0.5, 0.8),
+        hop_choices=(1, 2, 3, 4),
+        seed=3601,
+        deleakage_fit_samples=1024,
+    )
+    ssl_gen = PIDSar3DatasetGenerator(data_cfg)
+    enc_cfg = SSLEncoderConfig(input_dim=data_cfg.d, encoder_hidden_dim=96, representation_dim=48, projector_hidden_dim=96, projector_dim=48)
+    train_cfg = SSLTrainConfig(
+        lr=1e-3,
+        weight_decay=1e-5,
+        batch_size=192,
+        steps=180,
+        temperature=0.2,
+        device="cpu",
+        seed=111,
+        triangle_reg_weight=0.15,
+        confu_pair_weight=0.5,
+        confu_fused_weight=0.5,
+    )
+
+    unimodal_models, _ = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, train_cfg)
+    model_b, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce")
+    model_c, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "triangle_exact", "triangle_exact")
+    model_d, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "confu_style", "confu_style")
+
+    probe_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": data_cfg.seed}))
+    probe_all = _balanced_batch(probe_gen, n_per_pid=60, shuffle_seed=919, return_aux=True)
+    y_all_pid = probe_all["pid_id"].astype(np.int64)
+
+    X_all = {
+        "A": _concat_unimodal_frozen(unimodal_models, probe_all),
+        "B": _concat_trimodal_frozen(model_b, probe_all),
+        "C": _concat_trimodal_frozen(model_c, probe_all),
+        "D": _concat_trimodal_frozen(model_d, probe_all),
+    }
+    model_labels = {
+        "A": "A: 3x unimodal SimCLR",
+        "B": "B: pairwise InfoNCE",
+        "C": "C: TRIANGLE",
+        "D": "D: ConFu",
+    }
+    source_map = {
+        "12": ("x1", "x2"),
+        "13": ("x1", "x3"),
+        "23": ("x2", "x3"),
+        "123": ("x1", "x2", "x3"),
+    }
+    target_keys = {"1": "x1", "2": "x2", "3": "x3"}
+    decoder_labels = {"ridge": "Ridge", "mlp": "MLP"}
+
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=19)
+    fold_rows: List[Dict[str, float]] = []
+    for fold_idx, (tr_idx, te_idx) in enumerate(skf.split(np.zeros_like(y_all_pid), y_all_pid), start=1):
+        batch_tr = _slice_batch(probe_all, tr_idx)
+        batch_te = _slice_batch(probe_all, te_idx)
+        for mkey, X in X_all.items():
+            Xtr = X[tr_idx]
+            Xte = X[te_idx]
+            parts_tr = _split_modalities_from_concat(Xtr)
+            parts_te = _split_modalities_from_concat(Xte)
+            for src, src_keys in source_map.items():
+                Xsrc_tr = _subset_concat(parts_tr, src_keys)
+                Xsrc_te = _subset_concat(parts_te, src_keys)
+                for tgt in ("1", "2", "3"):
+                    Ytr = batch_tr[target_keys[tgt]].astype(np.float32)
+                    Yte = batch_te[target_keys[tgt]].astype(np.float32)
+                    for dec_key in ("ridge", "mlp"):
+                        metrics = _fit_reconstruction_decoder_metrics(Xsrc_tr, Ytr, Xsrc_te, Yte, decoder=dec_key)
+                        fold_rows.append(
+                            {
+                                "fold": float(fold_idx),
+                                "model": 0.0,
+                                "model_label": 0.0,
+                                "decoder": 0.0,
+                                "decoder_label": 0.0,
+                                "source": 0.0,
+                                "target": 0.0,
+                                "macro_r2": float(metrics["macro_r2"]),
+                                "macro_nrmse": float(metrics["macro_nrmse"]),
+                                "n_target_dims": float(metrics["n_target_dims"]),
+                            }
+                        )
+                        fold_rows[-1]["model"] = mkey  # type: ignore[assignment]
+                        fold_rows[-1]["model_label"] = model_labels[mkey]  # type: ignore[assignment]
+                        fold_rows[-1]["decoder"] = dec_key  # type: ignore[assignment]
+                        fold_rows[-1]["decoder_label"] = decoder_labels[dec_key]  # type: ignore[assignment]
+                        fold_rows[-1]["source"] = src  # type: ignore[assignment]
+                        fold_rows[-1]["target"] = tgt  # type: ignore[assignment]
+
+    with (out_dir / "source_to_target_reconstruction_four_models_5fold_per_fold.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "fold",
+                "model",
+                "model_label",
+                "decoder",
+                "decoder_label",
+                "source",
+                "target",
+                "macro_r2",
+                "macro_nrmse",
+                "n_target_dims",
+            ],
+        )
+        writer.writeheader()
+        for r in fold_rows:
+            writer.writerow(r)
+
+    grouped: Dict[Tuple[str, str, str, str], List[Dict[str, float]]] = {}
+    for r in fold_rows:
+        key = (str(r["model"]), str(r["decoder"]), str(r["source"]), str(r["target"]))
+        grouped.setdefault(key, []).append(r)
+
+    summary_rows: List[Dict[str, float]] = []
+    for (m, dec, src, tgt), rows in grouped.items():
+        r2_stats = _mean_ci95([float(r["macro_r2"]) for r in rows])
+        nr_stats = _mean_ci95([float(r["macro_nrmse"]) for r in rows])
+        summary_rows.append(
+            {
+                "model": 0.0,
+                "model_label": 0.0,
+                "decoder": 0.0,
+                "decoder_label": 0.0,
+                "source": 0.0,
+                "target": 0.0,
+                "n_folds": float(len(rows)),
+                "macro_r2_mean": float(r2_stats["mean"]),
+                "macro_r2_se": float(r2_stats["se"]),
+                "macro_nrmse_mean": float(nr_stats["mean"]),
+                "macro_nrmse_se": float(nr_stats["se"]),
+            }
+        )
+        summary_rows[-1]["model"] = m  # type: ignore[assignment]
+        summary_rows[-1]["model_label"] = model_labels[m]  # type: ignore[assignment]
+        summary_rows[-1]["decoder"] = dec  # type: ignore[assignment]
+        summary_rows[-1]["decoder_label"] = decoder_labels[dec]  # type: ignore[assignment]
+        summary_rows[-1]["source"] = src  # type: ignore[assignment]
+        summary_rows[-1]["target"] = tgt  # type: ignore[assignment]
+
+    summary_rows.sort(key=lambda r: (str(r["decoder"]), str(r["model"]), len(str(r["source"])), str(r["source"]), str(r["target"])))
+    with (out_dir / "source_to_target_reconstruction_four_models_5fold_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "model",
+                "model_label",
+                "decoder",
+                "decoder_label",
+                "source",
+                "target",
+                "n_folds",
+                "macro_r2_mean",
+                "macro_r2_se",
+                "macro_nrmse_mean",
+                "macro_nrmse_se",
+            ],
+        )
+        writer.writeheader()
+        for r in summary_rows:
+            writer.writerow(r)
+
+    def _group_name(src: str, tgt: str) -> str:
+        if len(src) == 1 and src == tgt:
+            return "self_1to1"
+        if len(src) == 1 and src != tgt:
+            return "single_cross"
+        if len(src) == 2 and tgt not in src:
+            return "pair_to_heldout_target"
+        if len(src) == 2 and tgt in src:
+            return "pair_to_member_target"
+        if len(src) == 3:
+            return "triple_to_target"
+        return "other"
+
+    grouped_rows: List[Dict[str, float]] = []
+    by_model_group: Dict[Tuple[str, str, str], List[Dict[str, float]]] = {}
+    for r in summary_rows:
+        g = _group_name(str(r["source"]), str(r["target"]))
+        by_model_group.setdefault((str(r["decoder"]), str(r["model"]), g), []).append(r)
+    for (dec, m, g), rows in by_model_group.items():
+        grouped_rows.append(
+            {
+                "decoder": 0.0,
+                "decoder_label": 0.0,
+                "model": 0.0,
+                "model_label": 0.0,
+                "group": 0.0,
+                "macro_r2_mean": float(np.mean([float(r["macro_r2_mean"]) for r in rows])),
+                "macro_nrmse_mean": float(np.mean([float(r["macro_nrmse_mean"]) for r in rows])),
+            }
+        )
+        grouped_rows[-1]["decoder"] = dec  # type: ignore[assignment]
+        grouped_rows[-1]["decoder_label"] = decoder_labels[dec]  # type: ignore[assignment]
+        grouped_rows[-1]["model"] = m  # type: ignore[assignment]
+        grouped_rows[-1]["model_label"] = model_labels[m]  # type: ignore[assignment]
+        grouped_rows[-1]["group"] = g  # type: ignore[assignment]
+
+    with (out_dir / "source_to_target_reconstruction_four_models_5fold_grouped_summary.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["decoder", "decoder_label", "model", "model_label", "group", "macro_r2_mean", "macro_nrmse_mean"],
+        )
+        writer.writeheader()
+        for r in grouped_rows:
+            writer.writerow(r)
+
+    fig, axes = plt.subplots(2, 4, figsize=(20.0, 10.5), sharex=True, sharey=True)
+    src_order = ["12", "13", "23", "123"]
+    tgt_order = ["1", "2", "3"]
+    for row_i, dec_key in enumerate(["ridge", "mlp"]):
+        for col_i, mkey in enumerate(["A", "B", "C", "D"]):
+            ax = axes[row_i, col_i]
+            row_map = {
+                (str(r["source"]), str(r["target"])): r
+                for r in summary_rows
+                if str(r["decoder"]) == dec_key and str(r["model"]) == mkey
+            }
+            mat = np.array([[float(row_map[(s, t)]["macro_r2_mean"]) for t in tgt_order] for s in src_order], dtype=np.float32)
+            im = ax.imshow(mat, aspect="auto", cmap="RdYlGn", vmin=-0.2, vmax=1.0)
+            title = f"{decoder_labels[dec_key]} | {model_labels[mkey]}"
+            ax.set_title(title, fontsize=9)
+            ax.set_xticks(range(len(tgt_order)))
+            ax.set_xticklabels([f"t{t}" for t in tgt_order], fontsize=8)
+            ax.set_yticks(range(len(src_order)))
+            ax.set_yticklabels([f"s{s}" for s in src_order], fontsize=8)
+            for i in range(mat.shape[0]):
+                for j in range(mat.shape[1]):
+                    ax.text(j, i, f"{mat[i,j]:.2f}", ha="center", va="center", fontsize=6)
+    fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.02, pad=0.02)
+    fig.suptitle("Frozen-encoder source->target reconstruction (macro R^2, 5-fold mean)", y=0.995)
+    fig.subplots_adjust(wspace=0.18, hspace=0.28)
+    _savefig(out_dir / "source_to_target_reconstruction_four_models_5fold_macro_r2_heatmaps.png")
+
+    assert len(summary_rows) == 2 * 4 * 4 * 3

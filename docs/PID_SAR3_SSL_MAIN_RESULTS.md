@@ -1,173 +1,34 @@
 # PID-SAR-3++ SSL Main Results
 
-This document reports the primary SSL results for PID-SAR-3++. It presents the corrected evaluation protocol, a compact set of representation-level diagnostics, and the source->target downstream benchmark used for method ranking. Hyperparameter sweeps, supplementary latent-proxy analyses, and broader ablations are reported separately in `docs/PID_SAR3_SSL_APPENDIX_ABLATIONS.md`.
+This document reports the main SSL results for PID-SAR-3++ using a same-world evaluation split, frozen encoders, and chance-corrected downstream metrics. Supplementary ablations and legacy analyses are moved to `docs/PID_SAR3_SSL_APPENDIX_ABLATIONS.md`.
 
 ## 6. SSL Results (Main Results)
 
-The section numbering below is preserved from the original SSL report to keep table/figure references stable.
+### 6.1 Main Result (What Matters)
 
-Main finding: on the regenerated 5-fold source->target evaluation reported with **Cohen's \(\kappa\)** (Section `6.8.1`), all methods are near chance on the hardest cross-modal pair->heldout-target tasks in this setup, while self/overcomplete tasks remain strong; the main practical conclusion is therefore that **the current training/evaluation regime is not yet producing robust cross-modal transfer under a chance-corrected metric**.
+Across three complementary validations, the same conclusion appears.
 
-### 6.1 Evaluation Protocol (Important Correction)
+1. In the primary source->target benchmark, the rotated `pair->heldout` tasks (`23->1`, `13->2`, `12->3`) are near chance under Cohen's kappa (\(\kappa\approx 0\)) for all methods.
+2. Retrieval (which is closer to the contrastive training objective) confirms that the encoders preserve strong instance alignment for self and overcomplete tasks, but not for `pair->heldout` transfer.
+3. Frozen-decoder reconstruction with both linear and nonlinear decoders improves easy settings, but `pair->heldout` reconstruction remains below baseline (negative macro \(R^2\)).
 
-Earlier comparisons used different dataset seeds for probe-train and probe-test generators. In PID-SAR-3++, changing the dataset seed changes the fixed projection operators, the fixed synergy network, and the de-leakage maps, so cross-seed probing evaluates transfer across different observation dictionaries rather than ordinary generalization to new samples from the same world.
+The main scientific conclusion is therefore not a model ranking claim. It is that the current regime does not yet produce robust cross-modal transfer to a heldout modality in a chance-corrected or reconstruction-based evaluation.
 
-All results reported here therefore use a same-world split: the SSL model and probe splits share the same dataset seed, while train/test probe examples are sampled independently. Encoders are frozen at evaluation time, the three modality embeddings are concatenated as `[h_1,h_2,h_3]`, and linear probes are fit on held-out data.
+### 6.2 Evaluation Protocol (Condensed)
 
-Implementation:
+All results here use a same-world split: SSL training and downstream probing share the same dataset seed, while probe train/test examples are disjoint samples from that same world. This avoids cross-seed dictionary changes from contaminating the evaluation.
 
-- `tests/test_pid_sar3_ssl_fused_confusions.py`
+Encoders are frozen. For source subsets, we concatenate the corresponding frozen modality embeddings. Unless otherwise noted, uncertainty is reported as mean \(\pm\) standard error, with \(\mathrm{SE}=s/\sqrt{n}\).
 
-### 6.1.1 Main-Results Reporting Contract
+### 6.3 Primary Benchmark: Source->Target Prediction (Cohen's \(\kappa\))
 
-To avoid presenting the benchmark as a single-seed leaderboard, the main results are defined as a small set of decision metrics reported with uncertainty across repeated runs. In practice, we report the sample mean \(\bar{x}\) together with the standard error \(\mathrm{SE}=s/\sqrt{n}\), where \(s\) is the sample standard deviation over runs and \(n\) is the number of runs.
+For each source->target task, we predict the raw target modality dimension-wise after train-median binarization and report the macro average of per-dimension Cohen's kappa,
+\[
+\bar{\kappa}=\frac{1}{D}\sum_{d=1}^{D}\kappa_d,\qquad \kappa=\frac{p_o-p_e}{1-p_e},
+\]
+where \(D\) is the target dimensionality, \(p_o\) is observed agreement, and \(p_e\) is chance agreement.
 
-The main text prioritizes one ranking target (the source->target matrix in Section `6.8.1`) together with a small number of failure-mode diagnostics, while broader sweeps and auxiliary tables are moved to the appendix.
-
-### 6.1.2 Repeated-Seed Secondary Diagnostics Snapshot (Quick CPU Run, `n=3`)
-
-We ran the repeated-seed summary harness (`test_main_results_four_models_repeated_seed_summary`) on February 23, 2026 in a short CPU regime (`n=3` dataset worlds / optimization seeds; `140` SSL steps). This run is not the final benchmark, but it is sufficient to replace single-seed statements with uncertainty-aware summaries.
-
-Secondary diagnostics (mean \(\pm\) SE):
-
-| Model | Family-3 acc | Family-3 \(\kappa\) | mean `R` recall | mean `R -> S` leakage | mean matched `R/S` centroid cos |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.566 ± 0.0068 | 0.342 ± 0.0080 | 0.546 ± 0.0135 | 0.201 ± 0.0094 | 0.769 ± 0.0227 |
-| B: pairwise InfoNCE | 0.560 ± 0.0010 | 0.331 ± 0.0012 | 0.520 ± 0.0059 | 0.200 ± 0.0108 | 0.921 ± 0.0095 |
-| C: TRIANGLE | 0.606 ± 0.0129 | 0.401 ± 0.0193 | 0.642 ± 0.0076 | 0.186 ± 0.0162 | 0.936 ± 0.0122 |
-| D: ConFu | 0.557 ± 0.0028 | 0.326 ± 0.0030 | 0.508 ± 0.0161 | 0.202 ± 0.0072 | 0.928 ± 0.0101 |
-
-Interpretation of the secondary diagnostics snapshot:
-
-- **TRIANGLE remains strongest in this short regime** on family classification and `R` recall, and it also has the lowest mean `R -> S` leakage among the four in this run.
-- **Unimodal SimCLR still has much lower matched `R/S` centroid overlap** than the cross-modal methods (better geometry on this pathology metric), so the story is not a single scalar ranking.
-- **Pairwise InfoNCE and ConFu are close on several summary metrics** in this short regime, which is exactly the kind of claim that should be reported with standard errors rather than one-run tables.
-
-Short-run caveat:
-
-- The supplementary synergy proxy `R²(y_s12_3)` remains highly unstable and strongly negative in this configuration (large variance across the `n=3` runs), so it should stay out of headline ranking claims in the main text.
-
-### 6.1.3 Lead Readout: Do The Encoders Capture U / R / S?
-
-Before any PID-label confusion matrix is shown, we report a subset-based family classification probe on frozen features. The probe evaluates subsets `x1`, `x2`, `x3`, `x12`, `x13`, `x23`, and `x123`, and asks whether the representation linearly separates the three PID families (unique, redundancy, synergy). We report family accuracy and Cohen's \(\kappa\), with \(\kappa = (p_o-p_e)/(1-p_e)\) and \(\kappa \approx 0\) at chance.
-
-Artifacts (4-model fused comparison):
-
-- `test_outputs/pid_sar3_ssl_fused_confusions/subset_family_probe_heatmaps_four_models.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_four_models_subset_predictors.csv`
-
-We place this readout first because it is a direct representation-level diagnostic: it reveals U/R/S tradeoffs without collapsing them into a single 10-way PID label metric.
-
-Quick snapshot from the current 4-model fused run (`x123` subset only; full subset grid is in the heatmap/CSV above):
-
-| Model | Family-3 acc (`x123`) | Family-3 \(\kappa\) (`x123`) |
-| --- | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.580 | 0.363 |
-| B: pairwise InfoNCE | 0.567 | 0.344 |
-| C: TRIANGLE | 0.619 | 0.420 |
-| D: ConFu | 0.589 | 0.375 |
-
-This `x123` table is only a compact snapshot. The full subset matrix (`x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`) is the key diagnostic because it shows which methods improve specifically when additional modalities are exposed.
-
-### 6.1.4 Chance-Centered Metric Choice
-
-The primary metric in this results section is **Cohen's kappa**, \(\kappa = (p_o - p_e)/(1 - p_e)\), because it is commonly accepted, chance-corrected, and directly interpretable: \(\kappa \approx 0\) indicates chance-level prediction and \(\kappa = 1\) indicates perfect agreement.
-
-### 6.2 Legacy Fused Classification Check (Context Only)
-
-Models:
-
-1. `A`: sum of 3 unimodal SimCLR losses (`x1`, `x2`, `x3` trained separately)
-2. `B`: sum of 3 pairwise InfoNCE losses (`(x1,x2)`, `(x1,x3)`, `(x2,x3)`)
-
-This two-model fused classification comparison is retained only as historical context for the protocol fix and for geometry/pathology intuition. It is not the primary ranking result.
-
-Context artifacts:
-
-- `test_outputs/pid_sar3_ssl_fused_confusions/pid10_confusions_fused_frozen_two_models.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_two_models_task_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_two_models_geometry_summary.csv`
-
-Takeaway (context only):
-
-- pairwise InfoNCE improves some local cross-modal alignment behavior but increases matched `R/S` centroid overlap, which was one reason PID-label classification alone was not a good headline benchmark.
-
-### 6.3 Legacy 4-Model Fused Classification Comparison (Context Only)
-
-We compare four methods under the same fused frozen protocol:
-
-1. `A`: 3x unimodal SimCLR
-2. `B`: pairwise InfoNCE sum (pairwise SimCLR/NT-Xent)
-3. `C`: TRIANGLE (area contrastive; closer to the paper's core similarity than the earlier proxy)
-4. `D`: ConFu (trainable pair-fusion heads + fused-pair-to-third contrastive terms)
-
-Related papers:
-
-- TRIANGLE (Grassucci et al.): *A TRIANGLE Enables Multimodal Alignment Beyond Cosine Similarity*
-- ConFu (Koutoupis et al.): *The More, the Merrier: Contrastive Fusion for Higher-Order Multimodal Alignment*
-
-This four-model fused classification comparison is useful for sanity checking geometry pathologies, but it is not the main benchmark because it over-emphasizes PID-label classification and latent-proxy `R²` summaries.
-
-Context artifacts:
-
-- `test_outputs/pid_sar3_ssl_fused_confusions/pid10_confusions_fused_frozen_four_models.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/geometry_pid_summary_four_models.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_four_models_task_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_four_models_geometry_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/subset_family_probe_heatmaps_four_models.png` (preferred representation-level readout)
-
-Takeaway (context only):
-
-- the 4-model fused comparison is best used to inspect failure modes (especially `Rij <-> Sij->k` overlap), while method ranking should come from the source->target downstream matrix in Section `6.8.1`.
-
-### 6.4 Redundancy Classification Sanity Check (Protocol Fix Evidence)
-
-Using the corrected same-world split, redundancy terms are much more learnable than in the earlier cross-seed experiments.
-
-This section is retained only to document why the corrected same-world split matters. The main-results document uses redundancy recall / `R->S` leakage as *secondary diagnostics* (see the repeated-seed snapshot in `6.1.2`), not as the headline benchmark.
-
-Short conclusion:
-
-- after fixing the split, redundancy terms become materially more learnable, confirming that earlier failures were partly protocol-induced rather than purely objective-induced.
-
-
-### 6.8 Tuned Long-Run Downstream Benchmark (Primary Results)
-
-This section contains the primary SSL benchmark result. The ranking target is the **source->target modality prediction matrix** in Section `6.8.1`, rather than PID-label classification or latent-proxy `R^2` tables.
-
-The tuned runs used a train/validation/test downstream split with validation-based model selection. In the original tuning run, hyperparameters were selected using validation mean latent-proxy performance (`y_macro_r2`); this is retained for provenance, but the headline evaluation reported here is source->target prediction.
-
-Methods:
-
-1. `A`: 3x unimodal SimCLR
-2. `B`: pairwise InfoNCE
-3. `C`: TRIANGLE (area contrastive)
-4. `D`: ConFu
-5. `E`: directional predictive hybrid (`[h_i,h_j] -> h_k`)
-
-Supplementary latent-proxy (`y_*`) regression artifacts are retained for interpretability and tuning provenance, but they are secondary and are discussed in `docs/PID_SAR3_SSL_APPENDIX_ABLATIONS.md`.
-
-### 6.8.1 Source->Target Modality Prediction (Primary Benchmark)
-
-The main downstream benchmark uses modalities directly. Given frozen encoder features for a source subset, we predict a target modality observation. The principal slice is the rotated pair->target setting (`23->1`, `13->2`, `12->3`), but the primary result is the full source->target matrix over sources in `{1,2,3,12,13,23,123}` and targets in `{1,2,3}`.
-
-This design avoids making a hand-crafted latent proxy the primary target. Instead, it asks whether the learned representation supports actual cross-modal prediction.
-
-Main result (one sentence): **under 5-fold macro-\(\kappa\), self/overcomplete source->target tasks remain strong but the cross-modal pair->heldout-target tasks are near chance for all methods, indicating that this regime does not yet support strong chance-corrected cross-modal prediction.**
-
-Presentation order in this section:
-
-- **Figure 14 + Table 7b (the full all-source->target matrix)** are the main benchmark result.
-- **Table 7** is a focused excerpt of the three rotated pair->target tasks (`23->1`, `13->2`, `12->3`) and should be read as a slice of `7b`.
-
-Before the full matrix, we report a grouped summary to separate near-ceiling sanity checks from genuinely discriminative cross-modal tasks.
-
-#### Table 7a. Grouped Summary Of The All Source->Target Matrix (macro-\(\kappa\) averages over task groups; A-D only, 5-fold)
-
-Sources:
-
-- `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_grouped_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_summary.csv`
+#### Table 7a. Grouped Summary Of The Source->Target Matrix (macro-\(\kappa\), 5-fold means)
 
 | Model | self `1->1/2->2/3->3` | single cross-modal (`1->2`, etc.) | pair->heldout target (`23->1`, `13->2`, `12->3`) | pair->member target (`12->1`, etc.) | `123->target` |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -176,51 +37,9 @@ Sources:
 | C: TRIANGLE | 0.536 | 0.010 | 0.014 | 0.521 | 0.507 |
 | D: ConFu | 0.558 | 0.009 | 0.013 | 0.545 | 0.532 |
 
-For each model \(m\) and task group \(G\), the grouped score is the mean \(\bar{\kappa}_{m,G} = \frac{1}{|G|}\sum_{t\in G} \kappa(m,t)\), where \(t\) indexes source->target tasks in that group.
+The grouped average for model \(m\) and task group \(G\) is \(\bar{\kappa}_{m,G}=|G|^{-1}\sum_{t\in G}\kappa(m,t)\).
 
-Main findings from Table 7a:
-
-- Self-prediction and overcomplete settings (`pair->member`, `123->target`) remain strong under \(\kappa\), but they are still sanity checks rather than ranking metrics.
-- The discriminative part of the benchmark is the **cross-modal** groups, and under \(\kappa\) these scores are close to zero in the current regime.
-- On the grouped pair->heldout-target average, differences are small (`A > B > C > D` here), which argues for improving the experimental regime before making strong method-ranking claims.
-
-Task construction is dimension-wise binary prediction on the target modality. For each target dimension, we threshold the raw target value at the train-split median (which yields approximately balanced classes), fit a linear classifier from frozen source features, and average performance across target dimensions.
-
-For each target dimension, we compute Cohen's \(\kappa_d\) from the binary predictions induced by the train-median threshold. The reported source->target score is the macro average \(\bar{\kappa} = \frac{1}{D}\sum_{d=1}^{D}\kappa_d\), where \(D\) is the target dimensionality.
-
-Evaluation is reported at three levels: (i) the full source->target matrix, (ii) the rotated pair->target slice, and (iii) PID-stratified heatmaps for the rotated slice.
-
-Primary pair->target artifacts:
-
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_overall_rotation_scores.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_scores.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_heatmaps.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
-- `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1_heatmaps.png`
-- `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_summary.csv` (5-fold macro-\(\kappa\); also includes auxiliary scores)
-- `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_grouped_summary.csv` (5-fold grouped summary)
-
-Figures 12-14 are legacy visualizations retained for qualitative structure. Tables 7a/7/7b below are the regenerated **5-fold macro-\(\kappa\)** results.
-
-![Rotated pair->target downstream summary](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.png)
-
-*Figure 12. Legacy rotated pair->target summary visualization retained for qualitative comparison (original plot labels use a normalized score).*
-
-![PID-by-rotation pair->target heatmaps](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_pid_rotation_heatmaps.png)
-
-*Figure 13. Legacy `PID x rotation` pair->target visualization retained for qualitative comparison (original plot labels use a normalized score).*
-
-![All source->target macro-F1 heatmaps](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1_heatmaps.png)
-
-*Figure 14. Legacy all source->target visualization retained for qualitative structure. The quantitative main result is reported in Tables 7a/7/7b using macro-\(\kappa\).*
-
-#### Table 7. Focused Excerpt From The Main Matrix: Rotated Pair->Target Results (macro-\(\kappa\), 5-fold mean \(\pm\) SE)
-
-Sources:
-
-- `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_summary.csv`
+#### Table 7. Rotated Pair->Heldout Targets (macro-\(\kappa\), 5-fold mean \(\pm\) SE)
 
 | Model | `23->1` \(\kappa\) | `13->2` \(\kappa\) | `12->3` \(\kappa\) |
 | --- | ---: | ---: | ---: |
@@ -229,23 +48,11 @@ Sources:
 | C: TRIANGLE | 0.014 ± 0.003 | 0.009 ± 0.005 | 0.019 ± 0.003 |
 | D: ConFu | 0.015 ± 0.003 | 0.012 ± 0.002 | 0.012 ± 0.003 |
 
-Rotation-level highlights:
+Interpretation: all four methods are near chance on the discriminative cross-modal tasks under a chance-corrected metric.
 
-- `23->1`: `A` and `B` are effectively tied at the top within the reported SE (`\kappa \approx 0.024`)
-- `13->2`: `B` is highest (`\kappa \approx 0.018`)
-- `12->3`: `A` is highest (`\kappa \approx 0.021`), with `C` close (`\kappa \approx 0.019`)
+#### Table 7b. Main Result Matrix: All Source->Target Tasks (macro-\(\kappa\), 5-fold means)
 
-Interpretation of the rotated pair->target slice:
-
-- Under the regenerated 5-fold \(\kappa\) evaluation, all three rotated pair->target tasks are **close to chance** for all methods (\(\kappa\) values near zero).
-- The ordering is therefore much less stable and much less important than the stronger conclusion: **the regime needs improvement before chance-corrected cross-modal claims are convincing**.
-- The legacy score plots remain useful for qualitative comparison, but they overstate practical separability relative to \(\kappa\).
-
-#### Table 7b. Main Result Matrix: All Source->Target Rotations (macro-\(\kappa\), A-D only, 5-fold means)
-
-Source: `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_summary.csv`
-
-Cell colors use a fixed threshold at \(\kappa = 0.25\): green for \(\kappa > 0.25\), red for \(\kappa \le 0.25\).
+Cell colors use a fixed threshold at \(\kappa=0.25\): green for \(\kappa>0.25\), red for \(\kappa\le 0.25\).
 
 <table>
   <thead>
@@ -258,66 +65,111 @@ Cell colors use a fixed threshold at \(\kappa = 0.25\): green for \(\kappa > 0.2
     </tr>
   </thead>
   <tbody>
-    <tr><td><code>1-&gt;1</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.654</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.559</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.541</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.560</span></td></tr>
-    <tr><td><code>2-&gt;1</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.017</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.014</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.001</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.005</span></td></tr>
-    <tr><td><code>3-&gt;1</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.020</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.024</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.016</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.019</span></td></tr>
-    <tr><td><code>12-&gt;1</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.641</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.544</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.527</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.551</span></td></tr>
-    <tr><td><code>13-&gt;1</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.643</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.543</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.525</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.544</span></td></tr>
-    <tr><td><code>23-&gt;1</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.024</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.024</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.014</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.015</span></td></tr>
-    <tr><td><code>123-&gt;1</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.631</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.529</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.513</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.533</span></td></tr>
-    <tr><td><code>1-&gt;2</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.011</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.010</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.004</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.014</span></td></tr>
-    <tr><td><code>2-&gt;2</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.662</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.557</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.538</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.550</span></td></tr>
-    <tr><td><code>3-&gt;2</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.006</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.012</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.009</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.002</span></td></tr>
-    <tr><td><code>12-&gt;2</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.646</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.543</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.519</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.536</span></td></tr>
-    <tr><td><code>13-&gt;2</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.016</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.018</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.009</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.012</span></td></tr>
-    <tr><td><code>23-&gt;2</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.648</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.541</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.523</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.536</span></td></tr>
-    <tr><td><code>123-&gt;2</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.634</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.526</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.505</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.522</span></td></tr>
-    <tr><td><code>1-&gt;3</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.017</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.012</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.013</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.008</span></td></tr>
-    <tr><td><code>2-&gt;3</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.013</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.003</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.014</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.006</span></td></tr>
-    <tr><td><code>3-&gt;3</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.662</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.547</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.530</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.564</span></td></tr>
-    <tr><td><code>12-&gt;3</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.021</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.009</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.019</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.012</span></td></tr>
-    <tr><td><code>13-&gt;3</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.650</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.533</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.517</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.551</span></td></tr>
-    <tr><td><code>23-&gt;3</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.650</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.531</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.518</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.550</span></td></tr>
-    <tr><td><code>123-&gt;3</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.637</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.518</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.504</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.540</span></td></tr>
+    <tr><td><code>1->1</code></td><td align="right" style="background:#d9f2d9;">0.654</td><td align="right" style="background:#d9f2d9;">0.559</td><td align="right" style="background:#d9f2d9;">0.541</td><td align="right" style="background:#d9f2d9;">0.560</td></tr>
+    <tr><td><code>1->2</code></td><td align="right" style="background:#f8d7da;">0.011</td><td align="right" style="background:#f8d7da;">0.010</td><td align="right" style="background:#f8d7da;">0.004</td><td align="right" style="background:#f8d7da;">0.014</td></tr>
+    <tr><td><code>1->3</code></td><td align="right" style="background:#f8d7da;">0.017</td><td align="right" style="background:#f8d7da;">0.012</td><td align="right" style="background:#f8d7da;">0.013</td><td align="right" style="background:#f8d7da;">0.008</td></tr>
+    <tr><td><code>2->1</code></td><td align="right" style="background:#f8d7da;">0.017</td><td align="right" style="background:#f8d7da;">0.014</td><td align="right" style="background:#f8d7da;">0.001</td><td align="right" style="background:#f8d7da;">0.005</td></tr>
+    <tr><td><code>2->2</code></td><td align="right" style="background:#d9f2d9;">0.662</td><td align="right" style="background:#d9f2d9;">0.557</td><td align="right" style="background:#d9f2d9;">0.538</td><td align="right" style="background:#d9f2d9;">0.550</td></tr>
+    <tr><td><code>2->3</code></td><td align="right" style="background:#f8d7da;">0.013</td><td align="right" style="background:#f8d7da;">0.003</td><td align="right" style="background:#f8d7da;">0.014</td><td align="right" style="background:#f8d7da;">0.006</td></tr>
+    <tr><td><code>3->1</code></td><td align="right" style="background:#f8d7da;">0.020</td><td align="right" style="background:#f8d7da;">0.024</td><td align="right" style="background:#f8d7da;">0.016</td><td align="right" style="background:#f8d7da;">0.019</td></tr>
+    <tr><td><code>3->2</code></td><td align="right" style="background:#f8d7da;">0.006</td><td align="right" style="background:#f8d7da;">0.012</td><td align="right" style="background:#f8d7da;">0.009</td><td align="right" style="background:#f8d7da;">0.002</td></tr>
+    <tr><td><code>3->3</code></td><td align="right" style="background:#d9f2d9;">0.662</td><td align="right" style="background:#d9f2d9;">0.547</td><td align="right" style="background:#d9f2d9;">0.530</td><td align="right" style="background:#d9f2d9;">0.564</td></tr>
+    <tr><td><code>12->1</code></td><td align="right" style="background:#d9f2d9;">0.641</td><td align="right" style="background:#d9f2d9;">0.544</td><td align="right" style="background:#d9f2d9;">0.527</td><td align="right" style="background:#d9f2d9;">0.551</td></tr>
+    <tr><td><code>12->2</code></td><td align="right" style="background:#d9f2d9;">0.646</td><td align="right" style="background:#d9f2d9;">0.543</td><td align="right" style="background:#d9f2d9;">0.519</td><td align="right" style="background:#d9f2d9;">0.536</td></tr>
+    <tr><td><code>12->3</code></td><td align="right" style="background:#f8d7da;">0.021</td><td align="right" style="background:#f8d7da;">0.009</td><td align="right" style="background:#f8d7da;">0.019</td><td align="right" style="background:#f8d7da;">0.012</td></tr>
+    <tr><td><code>13->1</code></td><td align="right" style="background:#d9f2d9;">0.643</td><td align="right" style="background:#d9f2d9;">0.543</td><td align="right" style="background:#d9f2d9;">0.525</td><td align="right" style="background:#d9f2d9;">0.544</td></tr>
+    <tr><td><code>13->2</code></td><td align="right" style="background:#f8d7da;">0.016</td><td align="right" style="background:#f8d7da;">0.018</td><td align="right" style="background:#f8d7da;">0.009</td><td align="right" style="background:#f8d7da;">0.012</td></tr>
+    <tr><td><code>13->3</code></td><td align="right" style="background:#d9f2d9;">0.650</td><td align="right" style="background:#d9f2d9;">0.533</td><td align="right" style="background:#d9f2d9;">0.517</td><td align="right" style="background:#d9f2d9;">0.551</td></tr>
+    <tr><td><code>23->1</code></td><td align="right" style="background:#f8d7da;">0.024</td><td align="right" style="background:#f8d7da;">0.024</td><td align="right" style="background:#f8d7da;">0.014</td><td align="right" style="background:#f8d7da;">0.015</td></tr>
+    <tr><td><code>23->2</code></td><td align="right" style="background:#d9f2d9;">0.648</td><td align="right" style="background:#d9f2d9;">0.541</td><td align="right" style="background:#d9f2d9;">0.523</td><td align="right" style="background:#d9f2d9;">0.536</td></tr>
+    <tr><td><code>23->3</code></td><td align="right" style="background:#d9f2d9;">0.650</td><td align="right" style="background:#d9f2d9;">0.531</td><td align="right" style="background:#d9f2d9;">0.518</td><td align="right" style="background:#d9f2d9;">0.550</td></tr>
+    <tr><td><code>123->1</code></td><td align="right" style="background:#d9f2d9;">0.631</td><td align="right" style="background:#d9f2d9;">0.529</td><td align="right" style="background:#d9f2d9;">0.513</td><td align="right" style="background:#d9f2d9;">0.533</td></tr>
+    <tr><td><code>123->2</code></td><td align="right" style="background:#d9f2d9;">0.634</td><td align="right" style="background:#d9f2d9;">0.526</td><td align="right" style="background:#d9f2d9;">0.505</td><td align="right" style="background:#d9f2d9;">0.522</td></tr>
+    <tr><td><code>123->3</code></td><td align="right" style="background:#d9f2d9;">0.637</td><td align="right" style="background:#d9f2d9;">0.518</td><td align="right" style="background:#d9f2d9;">0.504</td><td align="right" style="background:#d9f2d9;">0.540</td></tr>
   </tbody>
 </table>
 
-Reading guide (how to use the main matrix):
+### 6.4 Retrieval Validation (Frozen Embeddings, Instance Retrieval)
 
-- `1->1`, `2->2`, `3->3` are self-prediction sanity checks.
-- `2->1`, `3->1`, `1->2`, ... are single-modality cross-modal transfers.
-- `23->1`, `13->2`, `12->3` are the main rotated pair->target tasks summarized in Table 7.
+To test what the contrastive encoders preserve without forcing a coordinate decoder, we evaluate source->target retrieval in frozen embedding space. For a query embedding, the positive is the matched sample in the target gallery. We report Recall@\(K\),
+\(\mathrm{R@}K = N^{-1}\sum_i \mathbf{1}[\mathrm{rank}_i \le K]\), and mean reciprocal rank, \(\mathrm{MRR}=N^{-1}\sum_i \mathrm{rank}_i^{-1}\).
 
-Why `7b` is the main result (rather than only the rotated subset):
+This retrieval benchmark is currently a single-run diagnostic (same-world setting), so we use it for structure and failure analysis rather than final ranking.
 
-- It shows the **full cross-modal behavior surface**, not only three selected tasks.
-- It separates ceiling sanity checks (`1->1`, `12->1`, `123->1`, etc.) from the tasks that actually rank methods.
-- It makes it harder to overfit the narrative to a small subset of rotations.
+#### Retrieval Summary (group means, Recall@1)
 
-Important note on the heuristic “applicable PID” averages:
+| Model | self | single cross-modal | pair->heldout | pair->member | `123->target` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A: 3x unimodal SimCLR | 1.000 | 0.001 | 0.001 | 0.582 | 0.168 |
+| B: pairwise InfoNCE | 1.000 | 0.000 | 0.001 | 0.037 | 0.022 |
+| C: TRIANGLE | 1.000 | 0.000 | 0.001 | 0.441 | 0.144 |
+| D: ConFu | 1.000 | 0.000 | 0.000 | 0.037 | 0.009 |
 
-- We also computed a simple heuristic split of PID atoms into “applicable / non-applicable” for each rotation, but the averages are noisy and not yet a reliable primary metric.
-- The full `PID x rotation` heatmaps are more informative than the heuristic scalar summary.
-- We also tested a directional predictive hybrid (`E`) in exploratory runs, but it is omitted from the primary table here per the current reporting preference.
+#### Retrieval Focused Slice (rotated `pair->heldout`, Recall@1)
 
+| Model | `23->1` | `13->2` | `12->3` |
+| --- | ---: | ---: | ---: |
+| A: 3x unimodal SimCLR | 0.002 | 0.000 | 0.000 |
+| B: pairwise InfoNCE | 0.001 | 0.001 | 0.001 |
+| C: TRIANGLE | 0.001 | 0.001 | 0.001 |
+| D: ConFu | 0.000 | 0.000 | 0.001 |
 
-### 6.9 What To Do Next (Downstream-First)
+Retrieval therefore supports the same core conclusion as Table 7: the hard cross-modal transfer slice is not solved, even when evaluated in an objective-aligned way.
 
-1. Add a **synergy-focused tuning track** (select on validation synergy \(\kappa\) instead of all-`y`) and compare with the all-`y` selected models.
-2. Evaluate both `h` and `z` (encoder vs projector outputs) for the downstream `y_*` classification probes; some objectives may hide more linear information in `h`.
-3. Add regime-stratified downstream results (`rho`, `sigma`, `hop`) to identify where higher-order methods help or hurt.
-4. Add formal `R-only` and `S-only` benchmark stages with the same frozen-encoder downstream protocol.
-5. Keep PID-term classification as a separate supervised stress test, not the main SSL ranking metric.
+### 6.5 Frozen-Decoder Reconstruction (Raw Target Modalities)
 
-### 6.10 Reproducing the SSL Comparisons
+We next test whether richer decoders can recover the heldout modality from frozen encoder features. We train multi-output decoders on frozen source features and reconstruct the raw target modality vector. We report macro \(R^2\),
+\[
+\bar{R}^2 = \frac{1}{D}\sum_{d=1}^{D} R_d^2,
+\]
+where \(R_d^2=1-\sum_i(y_{id}-\hat y_{id})^2 / \sum_i(y_{id}-\bar y_d)^2\). The baseline predictor (train-mean target) gives \(R^2\approx 0\); negative values indicate worse-than-baseline reconstruction.
 
-```bash
-python - <<'PY'
-from tests.test_pid_sar3_ssl_fused_confusions import test_plot_fused_confusions_two_models
-from tests.test_pid_sar3_ssl_fused_confusions import test_plot_fused_confusions_four_models_higher_order
+Decoders:
 
-test_plot_fused_confusions_two_models()
-test_plot_fused_confusions_four_models_higher_order()
-print("Saved outputs under test_outputs/pid_sar3_ssl_fused_confusions")
-PY
-```
+- `Ridge`: linear multi-output regression
+- `MLP`: nonlinear multi-output regression (frozen encoders, trainable decoder only)
+
+#### Reconstruction Summary (group means, macro \(R^2\))
+
+| Decoder | Model | pair->heldout target | pair->member target | `123->target` |
+| --- | --- | ---: | ---: | ---: |
+| Ridge | A: 3x unimodal SimCLR | -0.233 | 0.681 | 0.645 |
+| Ridge | B: pairwise InfoNCE | -0.251 | 0.487 | 0.426 |
+| Ridge | C: TRIANGLE | -0.250 | 0.463 | 0.395 |
+| Ridge | D: ConFu | -0.238 | 0.530 | 0.477 |
+| MLP | A: 3x unimodal SimCLR | -0.141 | 0.415 | 0.341 |
+| MLP | B: pairwise InfoNCE | -0.127 | 0.247 | 0.177 |
+| MLP | C: TRIANGLE | -0.131 | 0.249 | 0.181 |
+| MLP | D: ConFu | -0.120 | 0.274 | 0.204 |
+
+#### Reconstruction Focused Slice (rotated `pair->heldout`, macro \(R^2\), 5-fold mean \(\pm\) SE)
+
+| Decoder | Model | `23->1` | `13->2` | `12->3` |
+| --- | --- | ---: | ---: | ---: |
+| Ridge | A: 3x unimodal SimCLR | -0.232 ± 0.018 | -0.237 ± 0.011 | -0.231 ± 0.008 |
+| Ridge | B: pairwise InfoNCE | -0.248 ± 0.007 | -0.246 ± 0.012 | -0.259 ± 0.013 |
+| Ridge | C: TRIANGLE | -0.238 ± 0.011 | -0.264 ± 0.011 | -0.247 ± 0.008 |
+| Ridge | D: ConFu | -0.223 ± 0.009 | -0.246 ± 0.008 | -0.244 ± 0.009 |
+| MLP | A: 3x unimodal SimCLR | -0.140 ± 0.004 | -0.142 ± 0.005 | -0.139 ± 0.008 |
+| MLP | B: pairwise InfoNCE | -0.126 ± 0.004 | -0.129 ± 0.008 | -0.125 ± 0.009 |
+| MLP | C: TRIANGLE | -0.134 ± 0.005 | -0.132 ± 0.010 | -0.126 ± 0.004 |
+| MLP | D: ConFu | -0.110 ± 0.005 | -0.125 ± 0.006 | -0.125 ± 0.003 |
+
+Main reconstruction takeaway: a nonlinear decoder improves the hard `pair->heldout` slice relative to linear decoding (less negative \(R^2\)), but the frozen encoders still do not support baseline-beating heldout-modality reconstruction in this regime.
+
+### 6.6 Compact Representation Sanity Check (U/R/S Family Probe)
+
+As a representation-level sanity check, we evaluate a frozen linear probe on the `x123` subset for 3-way PID-family prediction (Unique / Redundancy / Synergy), reporting accuracy and Cohen's \(\kappa\).
+
+| Model | Family-3 acc (`x123`) | Family-3 \(\kappa\) (`x123`) |
+| --- | ---: | ---: |
+| A: 3x unimodal SimCLR | 0.580 | 0.363 |
+| B: pairwise InfoNCE | 0.568 | 0.344 |
+| C: TRIANGLE | 0.619 | 0.420 |
+| D: ConFu | 0.589 | 0.375 |
+
+This sanity check shows that the encoders do capture PID-family structure, but Tables 7, retrieval, and reconstruction show that this does not yet translate into strong heldout-modality transfer.
+
+### 6.7 Summary
+
+The results section is intentionally centered on one question: do frozen encoders support robust cross-modal transfer to a heldout modality? Under three different validations (chance-corrected prediction, retrieval, and reconstruction), the answer is currently no. The next iteration should target the `pair->heldout` slice directly in model selection and training.

@@ -478,3 +478,125 @@ test_plot_ssl_baseline_results()
 print("Saved SSL baseline outputs under test_outputs/pid_sar3_ssl")
 PY
 ```
+
+## 7. First Unimodal SSL Experiment: SimCLR Per Modality (Augmentation-Based)
+
+This is the first **strictly unimodal** SSL experiment: train one SimCLR encoder per modality using only augmentation pairs from the same modality (`x1`, `x2`, `x3`), then validate with a held-out **10-way PID-term linear probe**.
+
+This directly answers a key question:
+
+- from a single modality alone, **which of the 10 PID terms are actually being represented** after self-supervised pretraining?
+
+### 7.1 Why This Validation Is the Right First Step
+
+Aggregate accuracy alone is not enough here. A unimodal encoder can improve overall accuracy while still failing to represent specific PID terms (for example, confusing pairwise redundancy atoms or specific synergy directions).
+
+So the validation is intentionally structured as:
+
+- balanced held-out 10-way PID classification (`120` samples per PID term; chance = `0.10`)
+- overall accuracy **and** macro recall
+- per-term recall heatmaps (all 10 PID terms)
+- row-normalized confusion matrices (to inspect which terms get confused)
+- comparison against a raw-modality probe baseline (no SSL)
+
+### 7.2 Experiment Setup (Initial CPU Run)
+
+- three separate encoders: `x1`-only, `x2`-only, `x3`-only
+- objective: unimodal SimCLR (`NT-Xent`) with two augmentations of the same vector
+- augmentations (vector domain): feature dropout + gain scaling + additive jitter
+- training budget: `140` steps, batch size `192`, CPU
+- frozen probe: multinomial logistic regression on the learned representation
+
+Implementation entry point:
+
+- `tests/test_pid_sar3_unimodal_simclr.py`
+
+### 7.3 Results
+
+#### Training Curves
+
+![Unimodal SimCLR training losses](test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_training_losses.png)
+
+*Figure 11. Unimodal SimCLR training loss for `x1`, `x2`, and `x3` encoders.* All three runs train stably in this short regime, with final losses around `2.4`.
+
+#### Probe Summary (10-way PID Terms)
+
+![Unimodal SimCLR probe summary](test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_probe_summary.png)
+
+*Figure 12. Held-out 10-way PID-term probe performance for each modality (raw vs SimCLR).* The main signal is the improvement over the raw baseline, not the absolute ceiling, because this is a short unimodal pretraining run and each modality only sees part of the PID structure.
+
+#### Per-Term Recall Heatmap (Most Important)
+
+![Per-PID-term recall heatmap](test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_per_pid_recall_heatmap.png)
+
+*Figure 13. Per-PID-term recall for the 10-way probe, shown for raw and SimCLR features on each modality.* This is the primary validation plot for understanding which PID terms are represented by each unimodal encoder.
+
+#### Per-Term Recall Gain Heatmap (SimCLR - Raw)
+
+![Per-PID-term recall gain heatmap](test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_per_pid_recall_gain_heatmap.png)
+
+*Figure 14. Recall gain due to unimodal SimCLR for each PID term and modality.* Positive cells show terms whose single-modality representation improved after augmentation-based SSL.
+
+#### SimCLR Confusion Matrices (Per Modality)
+
+![Unimodal SimCLR confusions](test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_confusions.png)
+
+*Figure 15. Row-normalized confusion matrices for the 10-way PID probe on SimCLR features.* These reveal which PID terms remain systematically confusable within each modality after unimodal pretraining.
+
+#### Table 4. Unimodal SimCLR Summary (from `test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_summary.csv`)
+
+| Modality | Raw acc | SimCLR acc | Acc gain | Raw macro recall | SimCLR macro recall | Macro recall gain |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `x1` | 0.096 | 0.178 | +0.082 | 0.096 | 0.178 | +0.082 |
+| `x2` | 0.098 | 0.142 | +0.044 | 0.098 | 0.142 | +0.044 |
+| `x3` | 0.127 | 0.189 | +0.062 | 0.127 | 0.189 | +0.062 |
+
+All three modalities improve over the raw baseline in this run. `x3` has the best absolute SimCLR probe accuracy (`0.189`), while `x1` shows the largest gain over raw (`+0.082`).
+
+### 7.4 Which PID Terms Are Being Learned? (Validation-Focused Readout)
+
+The answer should be read from **Figure 13 / Figure 14 first**, then checked against the confusion matrices in Figure 15.
+
+Selected observations from `test_outputs/pid_sar3_ssl_unimodal/unimodal_simclr_per_pid_recall.csv`:
+
+- `x1` SimCLR improves several redundancy-linked / target-visible terms:
+  - `R13`: recall `0.108 -> 0.250` (`+0.142`)
+  - `R23`: recall `0.117 -> 0.250` (`+0.133`)
+  - `S23->1`: recall `0.142 -> 0.275` (`+0.133`)
+- `x2` SimCLR improves mainly broad discriminability and some unique-term separation:
+  - `U1`: recall `0.108 -> 0.225` (`+0.117`)
+  - `U3`: recall `0.058 -> 0.175` (`+0.117`)
+  - `R123`: recall `0.092 -> 0.167` (`+0.075`)
+- `x3` SimCLR shows the strongest gain on `R12`:
+  - `R12`: recall `0.083 -> 0.317` (`+0.233`)
+  - also gains on `R13` (`+0.133`) and `U3` (`+0.133`)
+
+Important caveat:
+
+- Some terms decrease for some modalities (for example `x3` on `S13->2` in this run). This is expected in an early unimodal setup because the augmentation invariances and objective may suppress features that are discriminative for specific PID terms.
+
+This is exactly why the per-term validation is necessary: without Figure 13 / Figure 14, those regressions are invisible in the aggregate numbers.
+
+### 7.5 What This Means for Next Steps
+
+Unimodal SimCLR is a good first diagnostic baseline, but it is not enough for PID-sensitive representation learning because:
+
+- it does not use cross-modal correspondence
+- it can learn augment-invariant features that improve generic separability while hurting some PID-specific distinctions
+- it has no mechanism to preserve directional synergy structure explicitly
+
+Recommended next validation-preserving extensions:
+
+1. Add unimodal BYOL/Barlow baselines with the same per-term recall heatmaps for fair comparison.
+2. Add cross-modal objectives and keep the exact same per-term validation protocol (Figures 13-15 style) so changes are interpretable.
+3. Add atom-aligned probes on learned embeddings (`y_u1`, `y_r12`, `y_r123`, `y_s12_3`) to separate "PID-term classification" from "latent-factor recoverability".
+
+### 7.6 Reproducing the Unimodal SimCLR Outputs
+
+```bash
+python - <<'PY'
+from tests.test_pid_sar3_unimodal_simclr import test_plot_unimodal_simclr_pid_term_validation
+test_plot_unimodal_simclr_pid_term_validation()
+print("Saved unimodal SimCLR outputs under test_outputs/pid_sar3_ssl_unimodal")
+PY
+```

@@ -31,6 +31,36 @@ class SSLTrainConfig:
     seed: int = 0
 
 
+@dataclass
+class VectorAugmentationConfig:
+    jitter_std: float = 0.08
+    feature_drop_prob: float = 0.10
+    gain_min: float = 0.9
+    gain_max: float = 1.1
+
+
+class VectorAugmenter(nn.Module):
+    """Simple SimCLR-style augmentations for synthetic vector observations."""
+
+    def __init__(self, cfg: Optional[VectorAugmentationConfig] = None):
+        super().__init__()
+        self.cfg = cfg or VectorAugmentationConfig()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not self.training:
+            return x
+        out = x
+        if self.cfg.feature_drop_prob > 0.0:
+            keep = (torch.rand_like(out) > self.cfg.feature_drop_prob).float()
+            out = out * keep
+        if self.cfg.gain_max > self.cfg.gain_min:
+            gains = torch.empty((out.shape[0], 1), device=out.device).uniform_(self.cfg.gain_min, self.cfg.gain_max)
+            out = out * gains
+        if self.cfg.jitter_std > 0.0:
+            out = out + self.cfg.jitter_std * torch.randn_like(out)
+        return out
+
+
 class ModalityEncoder(nn.Module):
     def __init__(self, cfg: SSLEncoderConfig):
         super().__init__()
@@ -89,6 +119,18 @@ class TriModalSSLModel(nn.Module):
     def forward(self, batch: Dict[str, torch.Tensor]) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
         h = self.encode(batch)
         z = self.project(h)
+        return h, z
+
+
+class UnimodalSimCLRModel(nn.Module):
+    def __init__(self, cfg: SSLEncoderConfig):
+        super().__init__()
+        self.encoder = ModalityEncoder(cfg)
+        self.projector = Projector(cfg)
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        h = self.encoder(x)
+        z = self.projector(h)
         return h, z
 
 
@@ -193,12 +235,66 @@ def train_ssl(
     return history
 
 
+def train_unimodal_simclr(
+    model: UnimodalSimCLRModel,
+    generator,
+    modality_key: str,
+    cfg: SSLTrainConfig,
+    augmenter: Optional[VectorAugmenter] = None,
+    pid_schedule: Optional[Iterable[int]] = None,
+) -> List[Dict[str, float]]:
+    torch.manual_seed(cfg.seed)
+    np.random.seed(cfg.seed)
+    device = torch.device(cfg.device)
+    model.to(device)
+    model.train()
+    aug = augmenter or VectorAugmenter()
+    aug.to(device)
+    aug.train()
+    opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+
+    schedule_list = list(pid_schedule) if pid_schedule is not None else None
+    history: List[Dict[str, float]] = []
+    for step in range(1, cfg.steps + 1):
+        if schedule_list is None:
+            batch_np = generator.generate(n=cfg.batch_size)
+        else:
+            pids = [schedule_list[(step * cfg.batch_size + i) % len(schedule_list)] for i in range(cfg.batch_size)]
+            batch_np = generator.generate(n=cfg.batch_size, pid_ids=pids)
+
+        x = torch.from_numpy(batch_np[modality_key]).float().to(device)
+        x1 = aug(x)
+        x2 = aug(x)
+        _, z1 = model(x1)
+        _, z2 = model(x2)
+        loss = _nt_xent_pair(z1, z2, temperature=cfg.temperature)
+
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        opt.step()
+
+        history.append({"step": float(step), "loss": float(loss.detach().cpu())})
+    return history
+
+
 @torch.no_grad()
 def encode_numpy(model: TriModalSSLModel, batch: Dict[str, np.ndarray], device: str = "cpu") -> Dict[str, np.ndarray]:
     model.eval()
     t_batch = numpy_batch_to_torch(batch, device=device)
     reps = model.encode(t_batch)
     return {k: reps[k].detach().cpu().numpy().astype(np.float32) for k in ("x1", "x2", "x3")}
+
+
+@torch.no_grad()
+def encode_unimodal_numpy(
+    model: UnimodalSimCLRModel,
+    x: np.ndarray,
+    device: str = "cpu",
+) -> np.ndarray:
+    model.eval()
+    xt = torch.from_numpy(x).float().to(device)
+    h = model.encoder(xt)
+    return h.detach().cpu().numpy().astype(np.float32)
 
 
 def concat_representations(reps: Dict[str, np.ndarray]) -> np.ndarray:

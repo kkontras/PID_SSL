@@ -17,3 +17,39 @@ S12->3,R2(y_s | x1) source single,-0.140141
 S12->3,R2(y_s | x2) source single,-0.008368
 S12->3,R2(y_s | [x1,x2]) source joint,-0.071360
 S12->3,source joint gain,-0.062992
+U1,logreg:x1->y_u1,0.998295
+U1,logreg:x2->y_u1 ctrl,0.469401
+U1,logreg:x3->y_u1 ctrl,0.534629
+R12,logreg:x1->y_r12,0.936133
+R12,logreg:x2->y_r12,0.938141
+R12,logreg:x3->y_r12 ctrl,0.459183
+R12,logreg:[x1,x2]->y_r12,0.966259
+R12,logreg:joint gain,0.028118
+R123,logreg:x1->y_r123,0.933056
+R123,logreg:x2->y_r123,0.931173
+R123,logreg:x3->y_r123,0.918056
+R123,logreg:[x1,x2,x3]->y_r123,0.968395
+R123,logreg:joint gain,0.035340
+S12->3,logreg:x3->y_s target,0.992083
+S12->3,logreg:x1->y_s,0.490078
+S12->3,logreg:x2->y_s,0.530756
+S12->3,logreg:[x1,x2]->y_s,0.508932
+S12->3,logreg:source joint gain,-0.021823
+U1,mlp:x1->y_u1,0.999043
+U1,mlp:x2->y_u1 ctrl,0.465755
+U1,mlp:x3->y_u1 ctrl,0.441804
+R12,mlp:x1->y_r12,0.935399
+R12,mlp:x2->y_r12,0.920337
+R12,mlp:x3->y_r12 ctrl,0.505046
+R12,mlp:[x1,x2]->y_r12,0.957499
+R12,mlp:joint gain,0.022099
+R123,mlp:x1->y_r123,0.916315
+R123,mlp:x2->y_r123,0.940194
+R123,mlp:x3->y_r123,0.922929
+R123,mlp:[x1,x2,x3]->y_r123,0.960191
+R123,mlp:joint gain,0.019998
+S12->3,mlp:x3->y_s target,0.961683
+S12->3,mlp:x1->y_s,0.541711
+S12->3,mlp:x2->y_s,0.492838
+S12->3,mlp:[x1,x2]->y_s,0.490703
+S12->3,mlp:source joint gain,-0.051008

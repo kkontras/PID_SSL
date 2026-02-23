@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import warnings
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -10,6 +11,11 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+from sklearn.exceptions import ConvergenceWarning
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import StandardScaler
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -149,6 +155,56 @@ def _random_feature_r2_scalar(X: np.ndarray, y: np.ndarray, n_features: int = 12
     y2 = y.reshape(-1, 1)
     Xtr, Ytr, Xte, Yte = _split_train_test(X, y2)
     return float(_random_feature_r2(Xtr, Ytr, Xte, Yte, n_features=n_features, seed=seed))
+
+
+def _binary_target_from_scalar(y: np.ndarray) -> np.ndarray:
+    thr = float(np.median(y))
+    z = (y > thr).astype(np.int64)
+    # Extremely unlikely, but guard against degenerate thresholding.
+    if np.unique(z).size < 2:
+        z = (y >= thr).astype(np.int64)
+    return z
+
+
+def _logreg_auroc_scalar(X: np.ndarray, y: np.ndarray, seed: int = 0) -> float:
+    z = _binary_target_from_scalar(y)
+    Xtr, Ztr, Xte, Zte = _split_train_test(X, z.reshape(-1, 1))
+    ztr = Ztr.ravel().astype(int)
+    zte = Zte.ravel().astype(int)
+    if len(np.unique(ztr)) < 2 or len(np.unique(zte)) < 2:
+        return 0.5
+    scaler = StandardScaler()
+    Xtr_s = scaler.fit_transform(Xtr)
+    Xte_s = scaler.transform(Xte)
+    clf = LogisticRegression(max_iter=500, random_state=seed)
+    clf.fit(Xtr_s, ztr)
+    p = clf.predict_proba(Xte_s)[:, 1]
+    return float(roc_auc_score(zte, p))
+
+
+def _mlp_auroc_scalar(X: np.ndarray, y: np.ndarray, seed: int = 0) -> float:
+    z = _binary_target_from_scalar(y)
+    Xtr, Ztr, Xte, Zte = _split_train_test(X, z.reshape(-1, 1))
+    ztr = Ztr.ravel().astype(int)
+    zte = Zte.ravel().astype(int)
+    if len(np.unique(ztr)) < 2 or len(np.unique(zte)) < 2:
+        return 0.5
+    scaler = StandardScaler()
+    Xtr_s = scaler.fit_transform(Xtr)
+    Xte_s = scaler.transform(Xte)
+    clf = MLPClassifier(
+        hidden_layer_sizes=(32,),
+        activation="relu",
+        alpha=1e-4,
+        learning_rate_init=1e-3,
+        max_iter=250,
+        random_state=seed,
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        clf.fit(Xtr_s, ztr)
+    p = clf.predict_proba(Xte_s)[:, 1]
+    return float(roc_auc_score(zte, p))
 
 
 def _synergy_delta(xi: np.ndarray, xj: np.ndarray, xk: np.ndarray) -> Tuple[float, float, float]:
@@ -954,15 +1010,112 @@ def test_plot_single_atom_correctness_validation():
         )
         return local_rows, checks
 
+    def _collect_cls_rows_for_sigma(sigma: float, seed: int, probe: str) -> List[Dict[str, float]]:
+        cfg = PIDDatasetConfig(
+            d=32,
+            m=8,
+            sigma=sigma,
+            alpha_min=1.5,
+            alpha_max=1.5,
+            rho_choices=(0.8,),
+            hop_choices=(2,),
+            seed=seed,
+            deleakage_fit_samples=1536,
+        )
+        gen = PIDSar3DatasetGenerator(cfg)
+        rows_cls: List[Dict[str, float]] = []
+        score_fn = _logreg_auroc_scalar if probe == "logreg" else _mlp_auroc_scalar
+        seed_off = 0 if probe == "logreg" else 1000
+
+        # U1
+        b_u1 = gen.generate(n=1200, pid_ids=[0] * 1200, return_aux=True)
+        y_u1 = b_u1["y_u1"]
+        rows_cls.extend(
+            [
+                {"atom": "U1", "metric": "x1->y_u1", "score": score_fn(b_u1["x1"], y_u1, seed=seed_off + 1)},
+                {"atom": "U1", "metric": "x2->y_u1 ctrl", "score": score_fn(b_u1["x2"], y_u1, seed=seed_off + 2)},
+                {"atom": "U1", "metric": "x3->y_u1 ctrl", "score": score_fn(b_u1["x3"], y_u1, seed=seed_off + 3)},
+            ]
+        )
+
+        # R12
+        b_r12 = gen.generate(n=1200, pid_ids=[3] * 1200, return_aux=True)
+        y_r12 = b_r12["y_r12"]
+        r12_x1 = score_fn(b_r12["x1"], y_r12, seed=seed_off + 11)
+        r12_x2 = score_fn(b_r12["x2"], y_r12, seed=seed_off + 12)
+        r12_x3 = score_fn(b_r12["x3"], y_r12, seed=seed_off + 13)
+        r12_x12 = score_fn(np.concatenate([b_r12["x1"], b_r12["x2"]], axis=1), y_r12, seed=seed_off + 14)
+        rows_cls.extend(
+            [
+                {"atom": "R12", "metric": "x1->y_r12", "score": r12_x1},
+                {"atom": "R12", "metric": "x2->y_r12", "score": r12_x2},
+                {"atom": "R12", "metric": "x3->y_r12 ctrl", "score": r12_x3},
+                {"atom": "R12", "metric": "[x1,x2]->y_r12", "score": r12_x12},
+                {"atom": "R12", "metric": "joint gain", "score": float(r12_x12 - max(r12_x1, r12_x2))},
+            ]
+        )
+
+        # R123
+        b_r123 = gen.generate(n=1200, pid_ids=[6] * 1200, return_aux=True)
+        y_r123 = b_r123["y_r123"]
+        r123_x1 = score_fn(b_r123["x1"], y_r123, seed=seed_off + 21)
+        r123_x2 = score_fn(b_r123["x2"], y_r123, seed=seed_off + 22)
+        r123_x3 = score_fn(b_r123["x3"], y_r123, seed=seed_off + 23)
+        r123_x123 = score_fn(np.concatenate([b_r123["x1"], b_r123["x2"], b_r123["x3"]], axis=1), y_r123, seed=seed_off + 24)
+        rows_cls.extend(
+            [
+                {"atom": "R123", "metric": "x1->y_r123", "score": r123_x1},
+                {"atom": "R123", "metric": "x2->y_r123", "score": r123_x2},
+                {"atom": "R123", "metric": "x3->y_r123", "score": r123_x3},
+                {"atom": "R123", "metric": "[x1,x2,x3]->y_r123", "score": r123_x123},
+                {"atom": "R123", "metric": "joint gain", "score": float(r123_x123 - max(r123_x1, r123_x2, r123_x3))},
+            ]
+        )
+
+        # S12->3
+        b_s = gen.generate(n=1600, pid_ids=[7] * 1600, return_aux=True)
+        y_s = b_s["y_s12_3"]
+        s_x3 = score_fn(b_s["x3"], y_s, seed=seed_off + 31)
+        s_x1 = score_fn(b_s["x1"], y_s, seed=seed_off + 32)
+        s_x2 = score_fn(b_s["x2"], y_s, seed=seed_off + 33)
+        s_x12 = score_fn(np.concatenate([b_s["x1"], b_s["x2"]], axis=1), y_s, seed=seed_off + 34)
+        rows_cls.extend(
+            [
+                {"atom": "S12->3", "metric": "x3->y_s target", "score": s_x3},
+                {"atom": "S12->3", "metric": "x1->y_s", "score": s_x1},
+                {"atom": "S12->3", "metric": "x2->y_s", "score": s_x2},
+                {"atom": "S12->3", "metric": "[x1,x2]->y_s", "score": s_x12},
+                {"atom": "S12->3", "metric": "source joint gain", "score": float(s_x12 - max(s_x1, s_x2))},
+            ]
+        )
+        return rows_cls
+
     rows_low, checks_low = _collect_rows_for_sigma(sigma=0.05, seed=1300)
     rows_high, _ = _collect_rows_for_sigma(sigma=0.45, seed=1301)
+    cls_rows = {
+        "logreg": {
+            "low": _collect_cls_rows_for_sigma(0.05, 2300, "logreg"),
+            "high": _collect_cls_rows_for_sigma(0.45, 2301, "logreg"),
+        },
+        "mlp": {
+            "low": _collect_cls_rows_for_sigma(0.05, 3300, "mlp"),
+            "high": _collect_cls_rows_for_sigma(0.45, 3301, "mlp"),
+        },
+    }
 
     atom_order = ["U1", "R12", "R123", "S12->3"]
     atom_rows_by_cond = {
         "low": {a: [r for r in rows_low if r["atom"] == a] for a in atom_order},
         "high": {a: [r for r in rows_high if r["atom"] == a] for a in atom_order},
     }
-    fig, axes = plt.subplots(2, 4, figsize=(28.0, 11.8))
+    cls_atom_rows = {
+        probe: {
+            cond: {a: [r for r in cls_rows[probe][cond] if r["atom"] == a] for a in atom_order}
+            for cond in ("low", "high")
+        }
+        for probe in ("logreg", "mlp")
+    }
+    fig, axes = plt.subplots(4, 4, figsize=(28.0, 23.0))
     palette = {
         "main": "#4c78a8",
         "control": "#bdbdbd",
@@ -976,26 +1129,27 @@ def test_plot_single_atom_correctness_validation():
         "R123": ["x1 -> y_r123", "x2 -> y_r123", "x3 -> y_r123", "[x1,x2,x3] -> y_r123", "joint gain"],
         "S12->3": ["x3 -> y_s (target)", "x1 -> y_s", "x2 -> y_s", "[x1,x2] -> y_s", "source joint gain"],
     }
-    atom_xlim: Dict[str, Tuple[float, float]] = {}
+    cls_xlim: Dict[str, Tuple[float, float]] = {}
     for atom in atom_order:
-        vals_low = np.array([r["score"] for r in atom_rows_by_cond["low"][atom]], dtype=np.float32)
-        vals_high = np.array([r["score"] for r in atom_rows_by_cond["high"][atom]], dtype=np.float32)
-        vals = np.concatenate([vals_low, vals_high])
-        if atom in ("U1", "R12", "R123"):
-            atom_xlim[atom] = (min(-0.18, float(np.min(vals)) - 0.06), 1.05)
-        else:
-            atom_xlim[atom] = (min(-0.30, float(np.min(vals)) - 0.06), max(1.05, float(np.max(vals)) + 0.10))
+        vals_all = []
+        for probe in ("logreg", "mlp"):
+            for cond in ("low", "high"):
+                vals_all.extend([r["score"] for r in cls_atom_rows[probe][cond][atom]])
+        vals = np.asarray(vals_all, dtype=np.float32)
+        cls_xlim[atom] = (min(-0.35, float(np.min(vals)) - 0.05), 1.02)
 
     cond_specs = [("low", 0.05), ("high", 0.45)]
-    for c_idx, (cond_key, sigma_val) in enumerate(cond_specs):
-        for a_idx, atom in enumerate(atom_order):
-            row = a_idx // 2
-            col = (a_idx % 2) + 2 * c_idx
-            ax = axes[row, col]
-            atom_metrics = atom_rows_by_cond[cond_key][atom]
-            raw_labels = [m["metric"] for m in atom_metrics]
-            labels = atom_labels[atom]
-            vals = np.array([m["score"] for m in atom_metrics], dtype=np.float32)
+    probe_specs = [("logreg", "Logistic regression probe (AUROC)"), ("mlp", "Small supervised MLP probe (AUROC)")]
+    for p_idx, (probe_key, _) in enumerate(probe_specs):
+        for c_idx, (cond_key, _sigma_val) in enumerate(cond_specs):
+            for a_idx, atom in enumerate(atom_order):
+                row = (a_idx // 2) + 2 * p_idx
+                col = (a_idx % 2) + 2 * c_idx
+                ax = axes[row, col]
+                atom_metrics = cls_atom_rows[probe_key][cond_key][atom]
+                raw_labels = [m["metric"] for m in atom_metrics]
+                labels = atom_labels[atom]
+                vals = np.array([m["score"] for m in atom_metrics], dtype=np.float32)
 
             colors = []
             for lbl in raw_labels:
@@ -1010,27 +1164,30 @@ def test_plot_single_atom_correctness_validation():
                 else:
                     colors.append(palette["main"])
 
-            y = np.arange(len(labels))
-            ax.barh(y, vals, color=colors, alpha=0.9)
-            ax.axvline(0.0, color="black", linewidth=0.8, alpha=0.6)
-            ax.set_title(atom)
-            ax.set_yticks(y)
-            ax.set_yticklabels(labels, fontsize=8)
-            ax.set_xlabel("held-out score (R²)")
-            ax.grid(axis="x", alpha=0.25)
-            for i, v in enumerate(vals):
-                pad = 0.02 if v >= 0 else -0.02
-                ax.text(v + pad, i, f"{v:.2f}", va="center", ha="left" if v >= 0 else "right", fontsize=8)
-            ax.invert_yaxis()
-            ax.set_xlim(*atom_xlim[atom])
+                y = np.arange(len(labels))
+                ax.barh(y, vals, color=colors, alpha=0.9)
+                ax.axvline(0.0, color="black", linewidth=0.8, alpha=0.6)
+                ax.set_title(atom)
+                ax.set_yticks(y)
+                ax.set_yticklabels(labels, fontsize=8)
+                ax.set_xlabel("held-out score (AUROC; gain bars = dAUROC)")
+                ax.grid(axis="x", alpha=0.25)
+                for i, v in enumerate(vals):
+                    pad = 0.02 if v >= 0 else -0.02
+                    ax.text(v + pad, i, f"{v:.2f}", va="center", ha="left" if v >= 0 else "right", fontsize=8)
+                ax.invert_yaxis()
+                ax.set_xlim(*cls_xlim[atom])
 
-    # Group headers: specify noise once per block instead of repeating in each panel title.
-    fig.text(0.25, 0.965, "Low-noise correctness block (sigma=0.05, alpha=1.5, rho=0.8, hop=2)", ha="center", va="top", fontsize=12)
-    fig.text(0.75, 0.965, "Higher-noise robustness view (sigma=0.45, alpha=1.5, rho=0.8, hop=2)", ha="center", va="top", fontsize=12)
-    fig.add_artist(plt.Line2D([0.5, 0.5], [0.08, 0.94], transform=fig.transFigure, color="0.75", linewidth=1.0))
+    # Headers: noise shown once per column block; probe family shown once per row block.
+    fig.text(0.25, 0.983, "Low-noise block (sigma=0.05, alpha=1.5, rho=0.8, hop=2)", ha="center", va="top", fontsize=12)
+    fig.text(0.75, 0.983, "Higher-noise block (sigma=0.45, alpha=1.5, rho=0.8, hop=2)", ha="center", va="top", fontsize=12)
+    fig.text(0.012, 0.74, "Logistic\nregression\nprobe", ha="left", va="center", fontsize=11)
+    fig.text(0.012, 0.29, "Small\nsupervised\nMLP probe", ha="left", va="center", fontsize=11)
+    fig.add_artist(plt.Line2D([0.5, 0.5], [0.06, 0.965], transform=fig.transFigure, color="0.75", linewidth=1.0))
+    fig.add_artist(plt.Line2D([0.03, 0.985], [0.515, 0.515], transform=fig.transFigure, color="0.75", linewidth=1.0))
 
-    fig.suptitle("Single-atom correctness validation: atom-aligned tasks under low and higher noise", y=0.995)
-    fig.subplots_adjust(hspace=0.42, wspace=0.40, left=0.06, right=0.985, bottom=0.08, top=0.90)
+    fig.suptitle("Single-atom correctness validation: linear vs small-MLP probes under low and higher noise", y=0.995)
+    fig.subplots_adjust(hspace=0.44, wspace=0.42, left=0.08, right=0.985, bottom=0.06, top=0.94)
     _savefig(out_dir / "single_atom_correctness_validation.png")
 
     csv_path = out_dir / "single_atom_correctness_validation.csv"
@@ -1038,6 +1195,10 @@ def test_plot_single_atom_correctness_validation():
         f.write("atom,metric,score\n")
         for r in rows_low:
             f.write(f"{r['atom']},{r['metric']},{r['score']:.6f}\n")
+        # Append classification references for the low-noise block used in Figure 1.
+        for probe_key in ("logreg", "mlp"):
+            for r in cls_rows[probe_key]["low"]:
+                f.write(f"{r['atom']},{probe_key}:{r['metric']},{r['score']:.6f}\n")
 
     # Near-ceiling correctness expectations (thresholds chosen to be robust across seeds in low-noise mode).
     assert checks_low["u1_x1"] > 0.90
@@ -1052,6 +1213,11 @@ def test_plot_single_atom_correctness_validation():
 
     assert checks_low["s_x3"] > 0.85
     assert max(checks_low["s_x1"], checks_low["s_x2"], checks_low["s_x12"]) < 0.30
+    # Probe sanity checks: AUROC should be high for aligned low-noise tasks and near chance for controls.
+    log_u1 = {r["metric"]: r["score"] for r in cls_rows["logreg"]["low"] if r["atom"] == "U1"}
+    assert log_u1["x1->y_u1"] > 0.90
+    assert 0.35 <= log_u1["x2->y_u1 ctrl"] <= 0.65
+    assert 0.35 <= log_u1["x3->y_u1 ctrl"] <= 0.65
 
 
 def test_plot_atom_gain_controls_ur():

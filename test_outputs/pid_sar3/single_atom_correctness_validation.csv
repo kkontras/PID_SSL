@@ -1,0 +1,19 @@
+atom,metric,score
+U1,R2(y_u1 | x1),0.997955
+U1,R2(y_u1 | x2) control,-0.068293
+U1,R2(y_u1 | x3) control,-0.025248
+R12,R2(y_r12 | x1),0.791279
+R12,R2(y_r12 | x2),0.764296
+R12,R2(y_r12 | x3) control,-0.016238
+R12,R2(y_r12 | [x1,x2]),0.871318
+R12,joint gain over best single,0.080039
+R123,R2(y_r123 | x1),0.773659
+R123,R2(y_r123 | x2),0.811211
+R123,R2(y_r123 | x3),0.777720
+R123,R2(y_r123 | [x1,x2,x3]),0.904630
+R123,joint gain over best single,0.093419
+S12->3,R2(y_s | x3) target decode,0.960260
+S12->3,R2(y_s | x1) source single,-0.140141
+S12->3,R2(y_s | x2) source single,-0.008368
+S12->3,R2(y_s | [x1,x2]) source joint,-0.071360
+S12->3,source joint gain,-0.062992

@@ -76,66 +76,17 @@ Given two view matrices `X_A` and `X_B`, define $D(X_A,X_B)=\frac{1}{2}\left(R^2
 
 For a fixed atom, let `X_k` denote the sample matrix from view `k`. Linear CCA is used as a cross-view geometric diagnostic, with fit-on-train and report-on-test to reduce overfitting. CCA complements `D(i,j)`; it does not replace it.
 
-## 3. Dataset Exploration (Figures with Equations and Interpretation)
+## 3. Dataset Exploration (Core Validation First)
 
-This section summarizes the main raw-data checks before the code walkthrough. Most plots use the dependence proxy $D(X_A,X_B)=\tfrac{1}{2}(R^2(X_A\to X_B)+R^2(X_B\to X_A))$. In the U/R regime, `D(1,2)` should be low for unique atoms and high for atoms that share signal between views 1 and 2.
+This section is ordered by evidential value for validating the generator. First comes single-atom correctness (the strongest check), then raw cross-view structure through the dependence proxy $D$, then stress behavior under targeted boosts. Throughout this section, `D(1,2)` means one thing: how much linearly predictable structure is shared between views 1 and 2.
 
-### 3.1 Figure A: Atom Gain Controls (Amplifying U vs R Unequally)
-
-![Atom gain controls for U/R](test_outputs/pid_sar3/atom_gain_controls_ur.png)
-
-This figure shows atom-dependent gain control, $\alpha_{\mathrm{eff}}=\alpha \cdot g(\mathrm{pid\_id})$, with fixed noise scale $\sigma`. The left panel tracks observed scale (mean $\|x_1\|$), and the right panel tracks `D(1,2)`. Boosting redundancy increases `D(1,2)` for `R12`, while boosting unique atoms mostly increases magnitude without adding cross-view dependence. Per-`pid` overrides support unequal emphasis within a family (for example, stronger `R12`, weaker `R123`).
-
-### 3.2 Figure B: PID Metadata Distributions (Sampling Sanity Check)
-
-![PID metadata distributions](test_outputs/pid_sar3/pid_metadata_distributions.png)
-
-This figure validates the sampling pipeline. Under a balanced schedule, class counts should be uniform across `pid_id`. The `alpha` boxplots should match the configured range, while `rho` should appear only for redundancy atoms and `hop` only for synergy atoms.
-
-### 3.3 Figure C: PID Dependence Distributions (Repeated-Batch Variability)
-
-![PID dependence distributions](test_outputs/pid_sar3/pid_dependence_distributions_boxplots.png)
-
-This figure shows repeated-batch distributions of $D(i,j)$, not just single estimates. It captures both the expected ordering (`R12` dominates `D(1,2)`, `R13` dominates `D(1,3)`, `R23` dominates `D(2,3)`) and sampling variability. `R123` remains elevated across all three pairs.
-
-### 3.4 Figure D: U/R Signature Grid Across Noise
-
-![U/R signature grid over sigma](test_outputs/pid_sar3/ur_compact_signature_grid_over_sigma.png)
-
-This heatmap is the fastest U/R sanity check. Each cell is $D(i,j)$ for one atom and one noise level $\sigma$. Unique atoms stay near the noise floor, pairwise redundancy atoms activate the matching pair, and `R123` elevates all pairs. As $\sigma$ increases, all values contract toward zero.
-
-### 3.5 Figure E: Hyperparameter Sweeps (`rho`, `sigma`, `alpha`)
-
-![U/R hyperparameter sweeps](test_outputs/pid_sar3/ur_hyperparameter_sweeps_compact.png)
-
-The left panel links the redundancy equation $r_i=\sqrt{\rho}\,r+\sqrt{1-\rho}\,\eta_i$ to the observed statistics: increasing $\rho$ increases shared latent content and should increase $D(x_1,x_2)$ for `R12`. The right panel shows how observed norm changes with signal amplitude `alpha` and noise scale `sigma` in $x_k=\mathrm{signal}_k+\varepsilon_k$.
-
-### 3.6 Figure F: Holdout CCA Companion (All Pairs, U1/R12/R123)
-
-![CCA all-pairs sigma=0.15](test_outputs/pid_sar3/cca_all_pairs_ur_sigma_0p15.png)
-
-![CCA all-pairs sigma=0.9](test_outputs/pid_sar3/cca_all_pairs_ur_sigma_0p9.png)
-
-These figures are the primary geometric sanity check for shared cross-view structure. For each atom (`U1`, `R12`, `R123`) and view pair, they show held-out CCA1 scores. At low noise (`sigma = 0.15`), `U1` stays low on pair `1-2`, `R12` is strongly elevated on pair `1-2`, and `R123` is elevated across all pairs. At high noise (`sigma = 0.9`), all values decrease but the redundancy ordering remains visible.
-
-Table 1 summarizes held-out CCA1 correlations from the current figures. Exact values vary with seed; the qualitative ordering is the main signal.
-
-| Atom | Sigma | CCA(1,2) | CCA(1,3) | CCA(2,3) | Interpretation |
-| --- | ---: | ---: | ---: | ---: | --- |
-| `U1` | 0.15 | 0.082 | 0.014 | 0.199 | Mostly low cross-view shared structure; residual nonzero values can occur due to finite-sample effects and random projections. |
-| `R12` | 0.15 | 0.523 | 0.114 | 0.033 | Strongly elevated on the matching pair `(1,2)`, low on mismatched pairs. |
-| `R123` | 0.15 | 0.368 | 0.436 | 0.322 | Elevated across all three pairs, consistent with triple redundancy. |
-| `U1` | 0.90 | 0.051 | 0.047 | 0.052 | Near-noise-floor across pairs under high noise. |
-| `R12` | 0.90 | 0.126 | 0.140 | 0.025 | Weaker than low-noise but still structured; pair `(1,2)` remains informative. |
-| `R123` | 0.90 | 0.115 | 0.160 | 0.240 | Shared structure persists across pairs but is attenuated by noise. |
-
-### 3.7 Figure G: Single-Atom Correctness Validation (Low Noise, Atom-Aligned Tasks)
+### 3.1 Single-Atom Correctness Validation (Most Important)
 
 ![Single-atom correctness validation](test_outputs/pid_sar3/single_atom_correctness_validation.png)
 
-Before stress tests, the generator should pass a correctness check: if only one atom is present, the aligned task should be solved nearly perfectly under low noise. The figure uses separate validation sets for `U1`, `R12`, `R123`, and `S12->3` with fixed settings (`sigma = 0.05`, `alpha = 1.5`, `rho = 0.8`, `hop = 2`). Targets are latent-derived (`y_u1`, `y_r12`, `y_r123`, `y_s12_3`), and probes are matched to the mechanism (linear decoders for unique/redundancy targets and a target-view decode for `S12->3`).
+This is the primary validation figure. Each panel uses a single-atom dataset (`U1`, `R12`, `R123`, or `S12->3`) under low noise (`sigma = 0.05`, `alpha = 1.5`, `rho = 0.8`, `hop = 2`) and tests an atom-aligned target. If this figure fails, the rest of the diagnostics are not interpretable.
 
-Read this figure row-wise. For `U1`, `R²(y_u1 \mid x1)` should be near one and inactive-view controls near chance. For `R12`, both `x1` and `x2` should decode `y_r12`, `x3` should remain a control, and `[x1,x2]` should be best. For `R123`, all three views should decode `y_r123`, with `[x1,x2,x3]` strongest. For `S12->3`, the stable correctness criterion is `R²(y_s12_3 \mid x3)` because the synergy latent is linearly projected into view 3; source-side synergy diagnostics are probe-dependent and handled below.
+Read the figure row-wise. For `U1`, `R²(y_u1 \mid x1)` should be near one and controls from inactive views should be near chance. For `R12`, both `x1` and `x2` should decode `y_r12`, `x3` should remain a control, and `[x1,x2]` should be best. For `R123`, all three views should decode `y_r123`, with `[x1,x2,x3]` strongest. For `S12->3`, the stable correctness criterion is `R²(y_s12_3 \mid x3)` because the synergy latent is linearly projected into view 3.
 
 | Atom-only validation set | Metric | Score | Expected behavior |
 | --- | --- | ---: | --- |
@@ -148,27 +99,48 @@ Read this figure row-wise. For `U1`, `R²(y_u1 \mid x1)` should be near one and 
 | `R123` | `R²(y_r123 | [x1,x2,x3])` | 0.905 | Joint decoder is strongest. |
 | `S12->3` | `R²(y_s12_3 | x3)` | 0.960 | Near-ceiling target-view decode for the synergy-generated latent. |
 
-This correctness block is the main guardrail for interpreting the later stress tests.
+### 3.2 Dependence Proxy Signatures (`D(i,j)`) for U/R Structure
 
-### 3.8 Figures H-J: Boosting Stress Tests (CCA, Atom-Aligned Tasks, and Synergy Gap)
+The next three figures validate raw cross-view structure through the dependence proxy $D(X_A,X_B)=\tfrac{1}{2}(R^2(X_A\to X_B)+R^2(X_B\to X_A))$. The interpretation is the same throughout: `D(1,2)` is high only when views 1 and 2 share predictable structure. In this dataset, `D(1,2)` should be low for `U1`, high for `R12`, and elevated for `R123`. This is the main raw-data sanity statistic for the U/R subset. When in doubt, inspect `D(1,2)` first and then check whether the matching atom (`R12`) is the one that moves.
 
-The next three summaries are stress tests, not correctness checks. They test whether diagnostics move in the expected direction when one atom is selectively amplified via `pid_gain_overrides`, with nuisance settings fixed (`sigma = 0.45`, `rho = 0.5`, `hop = 2`).
+![U/R signature grid over sigma](test_outputs/pid_sar3/ur_compact_signature_grid_over_sigma.png)
 
-![CCA boosting mechanisms summary](test_outputs/pid_sar3/cca_boosting_mechanisms_summary.png)
+This heatmap is the fastest U/R sanity check. Each cell is `D(i,j)` for one atom and one noise level `sigma`. Unique atoms stay near the noise floor, pairwise redundancy atoms activate the matching pair, and `R123` elevates all pairs. As `sigma` increases, all dependence values contract toward zero.
 
-The first heatmap uses holdout CCA summaries. It is informative for redundancy atoms (`R12`, `R123`) and intentionally weak for directional synergy. The `S12->3` entry uses `CCA([x1,x2], x3)` rather than pairwise CCA, but remains small because the synergy mechanism is nonlinear and de-leaked.
+![PID dependence distributions](test_outputs/pid_sar3/pid_dependence_distributions_boxplots.png)
 
-| Scenario | U1 summary CCA | R12 summary CCA | R123 summary CCA | `S12->3` joint CCA (`CCA([x1,x2],x3)`) |
-| --- | ---: | ---: | ---: | ---: |
-| baseline | 0.022 | 0.294 | 0.380 | 0.028 |
-| boost `U1` | 0.035 | 0.294 | 0.380 | 0.028 |
-| boost `R12` | 0.022 | 0.436 | 0.380 | 0.028 |
-| boost `R123` | 0.022 | 0.294 | 0.455 | 0.028 |
-| boost `S12->3` | 0.022 | 0.294 | 0.380 | 0.008 |
+This plot adds variability to the same `D(i,j)` story. It shows repeated-batch distributions of `D(1,2)`, `D(1,3)`, and `D(2,3)`, so both the expected ordering and the sampling spread are visible. The key reading remains the same: the matching redundancy atom should dominate its matching `D(i,j)`.
+
+![U/R hyperparameter sweeps](test_outputs/pid_sar3/ur_hyperparameter_sweeps_compact.png)
+
+This figure links the equations directly to `D`. Increasing `rho` in $r_i=\sqrt{\rho}\,r+\sqrt{1-\rho}\,\eta_i$ increases shared latent content and should increase `D(1,2)` for `R12`. The norm panel shows how `alpha` and `sigma` change raw scale in $x_k=\mathrm{signal}_k+\varepsilon_k$.
+
+### 3.3 CCA Redundancy Geometry (Complementary to `D`)
+
+![CCA all-pairs sigma=0.15](test_outputs/pid_sar3/cca_all_pairs_ur_sigma_0p15.png)
+
+![CCA all-pairs sigma=0.9](test_outputs/pid_sar3/cca_all_pairs_ur_sigma_0p9.png)
+
+These figures complement `D(i,j)` by visualizing held-out CCA1 scores for `U1`, `R12`, and `R123` across all view pairs. They are useful for geometric confirmation of redundancy structure: at low noise, `R12` is strongly elevated on pair `(1,2)` and `R123` is elevated across all pairs; at high noise, values shrink but the ordering remains visible.
+
+Table 1 summarizes held-out CCA1 correlations from the current figures. Exact values vary with seed; the qualitative ordering is the main signal.
+
+| Atom | Sigma | CCA(1,2) | CCA(1,3) | CCA(2,3) | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `U1` | 0.15 | 0.082 | 0.014 | 0.199 | Mostly low cross-view shared structure; residual nonzero values can occur due to finite-sample effects and random projections. |
+| `R12` | 0.15 | 0.523 | 0.114 | 0.033 | Strongly elevated on the matching pair `(1,2)`, low on mismatched pairs. |
+| `R123` | 0.15 | 0.368 | 0.436 | 0.322 | Elevated across all three pairs, consistent with triple redundancy. |
+| `U1` | 0.90 | 0.051 | 0.047 | 0.052 | Near-noise-floor across pairs under high noise. |
+| `R12` | 0.90 | 0.126 | 0.140 | 0.025 | Weaker than low-noise but still structured; pair `(1,2)` remains informative. |
+| `R123` | 0.90 | 0.115 | 0.160 | 0.240 | Shared structure persists across pairs but is attenuated by noise. |
+
+### 3.4 Targeted-Boost Stress Tests (Metric-Atom Alignment Matters)
+
+These summaries are stress tests, not correctness checks. They test whether diagnostics move in the expected direction when one atom is selectively amplified via `pid_gain_overrides`, with nuisance settings fixed (`sigma = 0.45`, `rho = 0.5`, `hop = 2`).
 
 ![Downstream task boosting summary](test_outputs/pid_sar3/downstream_task_boosting_summary.png)
 
-The second heatmap uses atom-aligned downstream tasks, which makes `U1` and `S12->3` boosts visible. Increasing `U1` does not change `y_u1`; it improves predictability of `y_u1` from `x1` by increasing signal in `x1`. `boost_S12->3` is visible in the target-view decode `Y_S12->3 from x3`.
+This is the most informative boost figure because it uses atom-aligned targets. It makes `boost_U1`, `boost_R12`, `boost_R123`, and `boost_S12->3` visible in the corresponding downstream tasks. Increasing `U1` does not change `y_u1`; it improves predictability of `y_u1` from `x1` by increasing signal in `x1`.
 
 | Scenario | `Y_U1` from `x1` | `Y_R12` from `[x1,x2]` | `Y_R123` from `[x1,x2,x3]` | `Y_S12->3` from `x3` |
 | --- | ---: | ---: | ---: | ---: |
@@ -180,7 +152,7 @@ The second heatmap uses atom-aligned downstream tasks, which makes `U1` and `S12
 
 ![Synergy task gap boosting summary](test_outputs/pid_sar3/synergy_task_gap_boosting_summary.png)
 
-The third summary isolates the joint-source aspect of `S12->3` using a probe gap, $\Delta_{\mathrm{task}} = R^2([x_1,x_2]\rightarrow y) - \max\{R^2(x_1\rightarrow y), R^2(x_2\rightarrow y)\}$. Absolute values are probe-dependent because the target is nonlinear and de-leaked; the useful signal is comparative. Boosting `S12->3` increases `R²(x3 \rightarrow y_s12_3)` and moves the joint-vs-single gap upward relative to baseline and unrelated boosts.
+This is the main synergy-specific stress diagnostic. It tracks the joint-vs-single probe gap $\Delta_{\mathrm{task}} = R^2([x_1,x_2]\rightarrow y) - \max\{R^2(x_1\rightarrow y), R^2(x_2\rightarrow y)\}$ for `S12->3`, plus the target-view decode `R²(x3 \rightarrow y_s12_3)`. Absolute values are probe-dependent, so the useful signal is the relative shift under `boost_S12->3`.
 
 | Scenario | `R²(x1→y)` | `R²(x2→y)` | `R²([x1,x2]→y)` | `Δ_task` | `R²(x3→y)` |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -190,6 +162,21 @@ The third summary isolates the joint-source aspect of `S12->3` using a probe gap
 | boost `R123` | -0.159 | -0.093 | -0.197 | -0.104 | 0.076 |
 | boost `S12->3` | -0.147 | -0.214 | -0.129 | 0.018 | 0.257 |
 
+![CCA boosting mechanisms summary](test_outputs/pid_sar3/cca_boosting_mechanisms_summary.png)
+
+This CCA boost summary is secondary. It is useful for redundancy boosts (`R12`, `R123`), but it is weak for directional synergy even when `CCA([x1,x2],x3)` is used.
+
+| Scenario | U1 summary CCA | R12 summary CCA | R123 summary CCA | `S12->3` joint CCA (`CCA([x1,x2],x3)`) |
+| --- | ---: | ---: | ---: | ---: |
+| baseline | 0.022 | 0.294 | 0.380 | 0.028 |
+| boost `U1` | 0.035 | 0.294 | 0.380 | 0.028 |
+| boost `R12` | 0.022 | 0.436 | 0.380 | 0.028 |
+| boost `R123` | 0.022 | 0.294 | 0.455 | 0.028 |
+| boost `S12->3` | 0.022 | 0.294 | 0.380 | 0.008 |
+
+### 3.5 Secondary / Optional Diagnostics
+
+The following tests are useful during development but are not required for the main validation argument in this note: `test_plot_pid_metadata_distributions()` (sampling sanity checks) and `test_plot_atom_gain_controls_ur()` (gain-effect intuition).
 ## 4. Code Tutorial (How the Dataset Is Implemented and Used)
 
 This section maps the formal specification to the implementation.
@@ -269,42 +256,52 @@ np.savez_compressed("data/pid_sar3_ur_train.npz", **batch)
 
 ### 4.5 Where the Diagnostics Are Implemented
 
-The main diagnostics are implemented in `tests/test_pid_sar3_dataset.py`: `test_plot_atom_gain_controls_ur()`, `test_plot_pid_metadata_distributions()`, `test_plot_pid_dependence_distributions_boxplots()`, `test_plot_ur_compact_signature_grid_over_sigma()`, `test_plot_ur_hyperparameter_sweeps_compact()`, `test_plot_cca_all_pairs_ur()`, `test_plot_single_atom_correctness_validation()`, `test_plot_cca_boosting_mechanisms_summary()`, `test_plot_downstream_task_boosting_summary()`, and `test_plot_synergy_task_gap_boosting_summary()`. They serve both as regression checks and as figure-generation scripts.
+The core diagnostics used in Section 3 are implemented in `tests/test_pid_sar3_dataset.py`: `test_plot_single_atom_correctness_validation()`, `test_plot_ur_compact_signature_grid_over_sigma()`, `test_plot_pid_dependence_distributions_boxplots()`, `test_plot_ur_hyperparameter_sweeps_compact()`, `test_plot_cca_all_pairs_ur()`, `test_plot_downstream_task_boosting_summary()`, `test_plot_synergy_task_gap_boosting_summary()`, and `test_plot_cca_boosting_mechanisms_summary()`. Two tests are useful but secondary for the main argument: `test_plot_pid_metadata_distributions()` and `test_plot_atom_gain_controls_ur()`.
 
 ## 5. Commands to Reproduce the Dataset and Figures
 
-### 5.1 Generate the U/R Diagnostic Figures (Recommended Entry Point)
+### 5.1 Generate the Core Validation Figures (Recommended Entry Point)
 
 ```bash
 python - <<'PY'
 from tests.test_pid_sar3_dataset import (
-    test_plot_atom_gain_controls_ur,
-    test_plot_pid_metadata_distributions,
-    test_plot_pid_dependence_distributions_boxplots,
-    test_plot_cca_all_pairs_ur,
     test_plot_single_atom_correctness_validation,
-    test_plot_cca_boosting_mechanisms_summary,
+    test_plot_ur_compact_signature_grid_over_sigma,
+    test_plot_pid_dependence_distributions_boxplots,
+    test_plot_ur_hyperparameter_sweeps_compact,
+    test_plot_cca_all_pairs_ur,
     test_plot_downstream_task_boosting_summary,
     test_plot_synergy_task_gap_boosting_summary,
-    test_plot_ur_compact_signature_grid_over_sigma,
-    test_plot_ur_hyperparameter_sweeps_compact,
+    test_plot_cca_boosting_mechanisms_summary,
 )
 
-test_plot_atom_gain_controls_ur()
-test_plot_pid_metadata_distributions()
-test_plot_pid_dependence_distributions_boxplots()
-test_plot_cca_all_pairs_ur()
 test_plot_single_atom_correctness_validation()
-test_plot_cca_boosting_mechanisms_summary()
+test_plot_ur_compact_signature_grid_over_sigma()
+test_plot_pid_dependence_distributions_boxplots()
+test_plot_ur_hyperparameter_sweeps_compact()
+test_plot_cca_all_pairs_ur()
 test_plot_downstream_task_boosting_summary()
 test_plot_synergy_task_gap_boosting_summary()
-test_plot_ur_compact_signature_grid_over_sigma()
-test_plot_ur_hyperparameter_sweeps_compact()
+test_plot_cca_boosting_mechanisms_summary()
 print("Saved plots under test_outputs/pid_sar3")
 PY
 ```
 
-This command generates the figures and CSV summaries referenced in Section 3, including the CCA diagnostics, single-atom correctness validation, and the boosting stress-test summaries.
+This command generates the main figures and CSV summaries referenced in Section 3 (single-atom correctness, `D(i,j)` U/R structure checks, CCA redundancy geometry, and targeted-boost stress tests).
+
+Optional secondary diagnostics (sampling sanity and gain-intuition):
+
+```bash
+python - <<'PY'
+from tests.test_pid_sar3_dataset import (
+    test_plot_pid_metadata_distributions,
+    test_plot_atom_gain_controls_ur,
+)
+test_plot_pid_metadata_distributions()
+test_plot_atom_gain_controls_ur()
+print("Saved optional diagnostics under test_outputs/pid_sar3")
+PY
+```
 
 ### 5.2 Generate and Save a Balanced U/R Dataset (`.npz`)
 

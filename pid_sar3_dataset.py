@@ -169,7 +169,7 @@ class PIDSar3DatasetGenerator:
     def _project(self, view: int, comp: str, latent: np.ndarray, alpha: float) -> np.ndarray:
         return alpha * (self.P[view][comp] @ latent)
 
-    def sample(self, pid_id: Optional[int] = None) -> Dict[str, np.ndarray]:
+    def sample(self, pid_id: Optional[int] = None, return_aux: bool = False) -> Dict[str, np.ndarray]:
         if pid_id is None:
             pid_id = int(self.rng.integers(0, 10))
 
@@ -184,6 +184,18 @@ class PIDSar3DatasetGenerator:
         x1 = np.zeros(self.cfg.d, dtype=np.float32)
         x2 = np.zeros(self.cfg.d, dtype=np.float32)
         x3 = np.zeros(self.cfg.d, dtype=np.float32)
+        aux: Dict[str, np.ndarray] = {}
+        if return_aux:
+            aux = {
+                "y_u1": np.float32(0.0),
+                "mask_y_u1": np.int64(0),
+                "y_r12": np.float32(0.0),
+                "mask_y_r12": np.int64(0),
+                "y_r123": np.float32(0.0),
+                "mask_y_r123": np.int64(0),
+                "y_s12_3": np.float32(0.0),
+                "mask_y_s12_3": np.int64(0),
+            }
 
         name = PID_ID_TO_NAME[pid_id]
 
@@ -191,6 +203,9 @@ class PIDSar3DatasetGenerator:
             u = self.rng.normal(size=(self.cfg.m,))
             target_view = int(name[-1])
             x = self._project(target_view, name, u, alpha)
+            if return_aux and pid_id == 0:
+                aux["y_u1"] = np.float32(u[0])
+                aux["mask_y_u1"] = np.int64(1)
             if target_view == 1:
                 x1 = x.astype(np.float32)
             elif target_view == 2:
@@ -208,6 +223,9 @@ class PIDSar3DatasetGenerator:
             i, j = int(name[1]), int(name[2])
             xi = self._project(i, name, ri, alpha)
             xj = self._project(j, name, rj, alpha)
+            if return_aux and pid_id == 3:
+                aux["y_r12"] = np.float32(r[0])
+                aux["mask_y_r12"] = np.int64(1)
             if i == 1:
                 x1 = xi.astype(np.float32)
             elif i == 2:
@@ -229,6 +247,9 @@ class PIDSar3DatasetGenerator:
             x1 = self._project(1, "R123", rs[0], alpha).astype(np.float32)
             x2 = self._project(2, "R123", rs[1], alpha).astype(np.float32)
             x3 = self._project(3, "R123", rs[2], alpha).astype(np.float32)
+            if return_aux:
+                aux["y_r123"] = np.float32(r[0])
+                aux["mask_y_r123"] = np.int64(1)
 
         elif name in ("S12->3", "S13->2", "S23->1"):
             pair = name[1:3]
@@ -245,6 +266,9 @@ class PIDSar3DatasetGenerator:
             s0 = self.synergy_mlp(a, b, hop)
             s = s0 - (a @ self.C_a[hop]) - (b @ self.C_b[hop])
             xk = self._project(target, syn_comp, s, alpha)
+            if return_aux and pid_id == 7:
+                aux["y_s12_3"] = np.float32(s[0])
+                aux["mask_y_s12_3"] = np.int64(1)
 
             if source_i == 1:
                 x1 = xi.astype(np.float32)
@@ -274,7 +298,7 @@ class PIDSar3DatasetGenerator:
         x2 = (x2 + self._noise()).astype(np.float32)
         x3 = (x3 + self._noise()).astype(np.float32)
 
-        return {
+        out = {
             "x1": x1,
             "x2": x2,
             "x3": x3,
@@ -284,11 +308,15 @@ class PIDSar3DatasetGenerator:
             "rho": np.float32(rho),
             "hop": np.int64(hop),
         }
+        if return_aux:
+            out.update(aux)
+        return out
 
     def generate(
         self,
         n: int,
         pid_ids: Optional[Sequence[int]] = None,
+        return_aux: bool = False,
     ) -> Dict[str, np.ndarray]:
         if pid_ids is not None and len(pid_ids) != n:
             raise ValueError("If pid_ids is provided, its length must match n")
@@ -303,9 +331,22 @@ class PIDSar3DatasetGenerator:
             "rho": np.zeros((n,), dtype=np.float32),
             "hop": np.zeros((n,), dtype=np.int64),
         }
+        if return_aux:
+            out.update(
+                {
+                    "y_u1": np.zeros((n,), dtype=np.float32),
+                    "mask_y_u1": np.zeros((n,), dtype=np.int64),
+                    "y_r12": np.zeros((n,), dtype=np.float32),
+                    "mask_y_r12": np.zeros((n,), dtype=np.int64),
+                    "y_r123": np.zeros((n,), dtype=np.float32),
+                    "mask_y_r123": np.zeros((n,), dtype=np.int64),
+                    "y_s12_3": np.zeros((n,), dtype=np.float32),
+                    "mask_y_s12_3": np.zeros((n,), dtype=np.int64),
+                }
+            )
 
         for idx in range(n):
-            sample = self.sample(None if pid_ids is None else int(pid_ids[idx]))
+            sample = self.sample(None if pid_ids is None else int(pid_ids[idx]), return_aux=return_aux)
             for key in out:
                 out[key][idx] = sample[key]
         return out

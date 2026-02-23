@@ -139,6 +139,18 @@ def _dependence_proxy(X: np.ndarray, Y: np.ndarray) -> float:
     return float(0.5 * (r2_xy + r2_yx))
 
 
+def _linear_r2_scalar(X: np.ndarray, y: np.ndarray) -> float:
+    y2 = y.reshape(-1, 1)
+    Xtr, Ytr, Xte, Yte = _split_train_test(X, y2)
+    return float(_linear_r2(Xtr, Ytr, Xte, Yte))
+
+
+def _random_feature_r2_scalar(X: np.ndarray, y: np.ndarray, n_features: int = 128, seed: int = 0) -> float:
+    y2 = y.reshape(-1, 1)
+    Xtr, Ytr, Xte, Yte = _split_train_test(X, y2)
+    return float(_random_feature_r2(Xtr, Ytr, Xte, Yte, n_features=n_features, seed=seed))
+
+
 def _synergy_delta(xi: np.ndarray, xj: np.ndarray, xk: np.ndarray) -> Tuple[float, float, float]:
     n = xi.shape[0]
     n_train = max(2, int(0.7 * n))
@@ -611,8 +623,10 @@ def test_plot_cca_boosting_mechanisms_summary():
                 metric_name = "mean pairwise CCA (R123)"
                 score = float(np.mean([ccas["1-2"], ccas["1-3"], ccas["2-3"]]))
             else:
-                metric_name = "mean pairwise CCA (S12->3)"
-                score = float(np.mean([ccas["1-2"], ccas["1-3"], ccas["2-3"]]))
+                metric_name = "CCA([1,2],3) for S12->3"
+                x12 = np.concatenate([batch["x1"], batch["x2"]], axis=1)
+                _, _, cc_joint = _top_cca_scores_holdout(x12, batch["x3"], ridge=1e-3)
+                score = float(cc_joint)
 
             rows.append(
                 {
@@ -658,6 +672,91 @@ def test_plot_cca_boosting_mechanisms_summary():
     assert metric_mat[2, 1] > baseline[1]  # boost_R12 impacts R12 summary
     assert metric_mat[3, 2] > baseline[2]  # boost_R123 impacts R123 summary
     assert np.all(np.isfinite(metric_mat))
+
+
+def test_plot_downstream_task_boosting_summary():
+    """
+    Task-aligned validation using latent-derived targets (Y's).
+    This makes U1 boosts visible, which pairwise cross-view metrics cannot do reliably.
+    """
+    out_dir = _ensure_plot_dir()
+    scenarios = [
+        ("baseline", None),
+        ("boost_U1", {0: 2.0}),
+        ("boost_R12", {3: 2.0}),
+        ("boost_R123", {6: 2.0}),
+        ("boost_S12->3", {7: 2.0}),
+    ]
+
+    task_names = ["Y_U1 from x1", "Y_R12 from [x1,x2]", "Y_R123 from [x1,x2,x3]", "Y_S12->3 from x3"]
+    metrics = np.zeros((len(scenarios), len(task_names)), dtype=np.float32)
+    rows = []
+
+    for s_idx, (label, overrides) in enumerate(scenarios):
+        cfg = PIDDatasetConfig(
+            d=32,
+            m=8,
+            sigma=0.45,
+            rho_choices=(0.5,),
+            hop_choices=(2,),
+            seed=1100,
+            deleakage_fit_samples=1024,
+            pid_gain_overrides=overrides,
+        )
+        gen = PIDSar3DatasetGenerator(cfg)
+
+        # U1 task
+        b_u1 = _generate_fixed_pid(gen, pid_id=0, n=700)
+        b_u1_aux = gen.generate(n=700, pid_ids=[0] * 700, return_aux=True)
+        y_u1 = b_u1_aux["y_u1"]
+        u1_score = _linear_r2_scalar(b_u1["x1"], y_u1)
+
+        # R12 task
+        b_r12 = gen.generate(n=700, pid_ids=[3] * 700, return_aux=True)
+        y_r12 = b_r12["y_r12"]
+        x12 = np.concatenate([b_r12["x1"], b_r12["x2"]], axis=1)
+        r12_score = _linear_r2_scalar(x12, y_r12)
+
+        # R123 task
+        b_r123 = gen.generate(n=700, pid_ids=[6] * 700, return_aux=True)
+        y_r123 = b_r123["y_r123"]
+        x123 = np.concatenate([b_r123["x1"], b_r123["x2"], b_r123["x3"]], axis=1)
+        r123_score = _linear_r2_scalar(x123, y_r123)
+
+        # S12->3 task: target-side latent decode from x3 (stable and directly affected by boosting).
+        b_s = gen.generate(n=900, pid_ids=[7] * 900, return_aux=True)
+        y_s = b_s["y_s12_3"]
+        s_score = _random_feature_r2_scalar(b_s["x3"], y_s, n_features=64, seed=9)
+
+        vals = [u1_score, r12_score, r123_score, s_score]
+        metrics[s_idx] = vals
+        for task, score in zip(task_names, vals):
+            rows.append({"scenario": label, "task": task, "score": float(score)})
+
+    fig, ax = plt.subplots(figsize=(10.2, 4.8))
+    im = ax.imshow(metrics, aspect="auto", cmap="viridis")
+    ax.set_xticks(range(len(task_names)))
+    ax.set_xticklabels(task_names, rotation=15, ha="right")
+    ax.set_yticks(range(len(scenarios)))
+    ax.set_yticklabels([s for s, _ in scenarios])
+    ax.set_title("Downstream task validation under targeted boosts")
+    for i in range(metrics.shape[0]):
+        for j in range(metrics.shape[1]):
+            ax.text(j, i, f"{metrics[i, j]:.2f}", ha="center", va="center", color="white", fontsize=8)
+    fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
+    _savefig(out_dir / "downstream_task_boosting_summary.png")
+
+    csv_path = out_dir / "downstream_task_boosting_summary.csv"
+    with csv_path.open("w", encoding="utf-8") as f:
+        f.write("scenario,task,score\n")
+        for r in rows:
+            f.write(f"{r['scenario']},{r['task']},{r['score']:.6f}\n")
+
+    baseline = metrics[0]
+    assert metrics[1, 0] > baseline[0]  # boost_U1 helps U1 task
+    assert metrics[2, 1] > baseline[1]  # boost_R12 helps R12 task
+    assert metrics[3, 2] > baseline[2]  # boost_R123 helps R123 task
+    assert np.all(np.isfinite(metrics))
 
 
 def test_plot_atom_gain_controls_ur():
@@ -881,6 +980,8 @@ if __name__ == "__main__":
     test_plot_cca_all_pairs_ur()
     test_plot_ur_intuition_scatter_examples()
     test_plot_r123_pca_all_pairs()
+    test_plot_cca_boosting_mechanisms_summary()
+    test_plot_downstream_task_boosting_summary()
     test_plot_pid_metadata_distributions()
     test_plot_pid_dependence_distributions_boxplots()
     print(f"Saved plots to {PLOT_DIR.resolve()}")

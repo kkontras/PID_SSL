@@ -245,29 +245,42 @@ Interpretation of the rotated pair->target slice:
 
 Source: `test_outputs/pid_sar3_ssl_fused_confusions/source_to_target_four_models_5fold_summary.csv`
 
-| Source->Target | A | B | C | D |
-| --- | ---: | ---: | ---: | ---: |
-| `1->1` | 0.654 | 0.559 | 0.541 | 0.560 |
-| `2->1` | 0.017 | 0.014 | 0.001 | 0.005 |
-| `3->1` | 0.020 | 0.024 | 0.016 | 0.019 |
-| `12->1` | 0.641 | 0.544 | 0.527 | 0.551 |
-| `13->1` | 0.643 | 0.543 | 0.525 | 0.544 |
-| `23->1` | 0.024 | 0.024 | 0.014 | 0.015 |
-| `123->1` | 0.631 | 0.529 | 0.513 | 0.533 |
-| `1->2` | 0.011 | 0.010 | 0.004 | 0.014 |
-| `2->2` | 0.662 | 0.557 | 0.538 | 0.550 |
-| `3->2` | 0.006 | 0.012 | 0.009 | 0.002 |
-| `12->2` | 0.646 | 0.543 | 0.519 | 0.536 |
-| `13->2` | 0.016 | 0.018 | 0.009 | 0.012 |
-| `23->2` | 0.648 | 0.541 | 0.523 | 0.536 |
-| `123->2` | 0.634 | 0.526 | 0.505 | 0.522 |
-| `1->3` | 0.017 | 0.012 | 0.013 | 0.008 |
-| `2->3` | 0.013 | 0.003 | 0.014 | 0.006 |
-| `3->3` | 0.662 | 0.547 | 0.530 | 0.564 |
-| `12->3` | 0.021 | 0.009 | 0.019 | 0.012 |
-| `13->3` | 0.650 | 0.533 | 0.517 | 0.551 |
-| `23->3` | 0.650 | 0.531 | 0.518 | 0.550 |
-| `123->3` | 0.637 | 0.518 | 0.504 | 0.540 |
+Cell colors use a fixed threshold at \(\kappa = 0.25\): green for \(\kappa > 0.25\), red for \(\kappa \le 0.25\).
+
+<table>
+  <thead>
+    <tr>
+      <th align="left">Source-&gt;Target</th>
+      <th align="right">A</th>
+      <th align="right">B</th>
+      <th align="right">C</th>
+      <th align="right">D</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><code>1-&gt;1</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.654</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.559</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.541</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.560</span></td></tr>
+    <tr><td><code>2-&gt;1</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.017</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.014</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.001</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.005</span></td></tr>
+    <tr><td><code>3-&gt;1</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.020</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.024</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.016</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.019</span></td></tr>
+    <tr><td><code>12-&gt;1</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.641</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.544</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.527</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.551</span></td></tr>
+    <tr><td><code>13-&gt;1</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.643</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.543</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.525</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.544</span></td></tr>
+    <tr><td><code>23-&gt;1</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.024</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.024</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.014</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.015</span></td></tr>
+    <tr><td><code>123-&gt;1</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.631</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.529</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.513</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.533</span></td></tr>
+    <tr><td><code>1-&gt;2</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.011</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.010</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.004</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.014</span></td></tr>
+    <tr><td><code>2-&gt;2</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.662</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.557</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.538</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.550</span></td></tr>
+    <tr><td><code>3-&gt;2</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.006</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.012</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.009</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.002</span></td></tr>
+    <tr><td><code>12-&gt;2</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.646</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.543</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.519</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.536</span></td></tr>
+    <tr><td><code>13-&gt;2</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.016</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.018</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.009</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.012</span></td></tr>
+    <tr><td><code>23-&gt;2</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.648</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.541</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.523</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.536</span></td></tr>
+    <tr><td><code>123-&gt;2</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.634</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.526</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.505</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.522</span></td></tr>
+    <tr><td><code>1-&gt;3</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.017</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.012</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.013</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.008</span></td></tr>
+    <tr><td><code>2-&gt;3</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.013</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.003</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.014</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.006</span></td></tr>
+    <tr><td><code>3-&gt;3</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.662</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.547</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.530</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.564</span></td></tr>
+    <tr><td><code>12-&gt;3</code></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.021</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.009</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.019</span></td><td align="right"><span style="background:#f8dddd;padding:1px 4px;border-radius:3px;">0.012</span></td></tr>
+    <tr><td><code>13-&gt;3</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.650</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.533</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.517</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.551</span></td></tr>
+    <tr><td><code>23-&gt;3</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.650</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.531</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.518</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.550</span></td></tr>
+    <tr><td><code>123-&gt;3</code></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.637</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.518</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.504</span></td><td align="right"><span style="background:#dff3df;padding:1px 4px;border-radius:3px;">0.540</span></td></tr>
+  </tbody>
+</table>
 
 Reading guide (how to use the main matrix):
 

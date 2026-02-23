@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import os
 import sys
 import warnings
 from pathlib import Path
@@ -1624,6 +1625,12 @@ def test_retrieval_source_to_target_four_models():
     model_b, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce")
     model_c, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "triangle_exact", "triangle_exact")
     model_d, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "confu_style", "confu_style")
+    # Training may run on GPU; move models back to CPU for sklearn-based probe stages.
+    for m in unimodal_models.values():
+        m.cpu()
+    model_b.cpu()
+    model_c.cpu()
+    model_d.cpu()
 
     probe_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": data_cfg.seed}))
     probe = _balanced_batch(probe_gen, n_per_pid=180, shuffle_seed=909, return_aux=True)
@@ -2581,15 +2588,19 @@ def test_analysis_bundle_four_models_compositional_very_easy():
     """
     out_dir = _ensure_plot_dir()
     data_cfg = _data_cfg_compositional_very_easy(seed=4001)
+    ssl_steps = int(os.getenv("PIDSSL_L0_SSL_STEPS", "180"))
+    probe_n_per_pid = int(os.getenv("PIDSSL_L0_PROBE_N_PER_PID", "40"))
+    n_splits = int(os.getenv("PIDSSL_L0_N_FOLDS", "2"))
+    train_device = str(os.getenv("PIDSSL_L0_DEVICE", "cpu"))
     ssl_gen = PIDSar3DatasetGenerator(data_cfg)
     enc_cfg = SSLEncoderConfig(input_dim=data_cfg.d, encoder_hidden_dim=96, representation_dim=48, projector_hidden_dim=96, projector_dim=48)
     train_cfg = SSLTrainConfig(
         lr=1e-3,
         weight_decay=1e-5,
         batch_size=192,
-        steps=180,
+        steps=ssl_steps,
         temperature=0.2,
-        device="cpu",
+        device=train_device,
         seed=141,
         triangle_reg_weight=0.15,
         confu_pair_weight=0.5,
@@ -2600,6 +2611,12 @@ def test_analysis_bundle_four_models_compositional_very_easy():
     model_b, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce")
     model_c, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "triangle_exact", "triangle_exact")
     model_d, _ = _train_trimodal_objective(ssl_gen, enc_cfg, train_cfg, "confu_style", "confu_style")
+    if train_device != "cpu":
+        for m in unimodal_models.values():
+            m.cpu()
+        model_b.cpu()
+        model_c.cpu()
+        model_d.cpu()
 
     model_labels = {
         "A": "A: 3x unimodal SimCLR",
@@ -2622,7 +2639,7 @@ def test_analysis_bundle_four_models_compositional_very_easy():
 
     # Shared probe set for retrieval + reconstruction (and also used for kappa folds).
     probe_gen = PIDSar3DatasetGenerator(_data_cfg_compositional_very_easy(seed=int(data_cfg.seed)))
-    probe = _balanced_batch(probe_gen, n_per_pid=40, shuffle_seed=969, return_aux=True)
+    probe = _balanced_batch(probe_gen, n_per_pid=probe_n_per_pid, shuffle_seed=969, return_aux=True)
     pid_ids = probe["pid_id"].astype(np.int64)
     y_all_pid = pid_ids.copy()
 
@@ -2636,7 +2653,7 @@ def test_analysis_bundle_four_models_compositional_very_easy():
     # -------------------------------------------------------------------------
     # (i) Source->target kappa (5-fold)
     # -------------------------------------------------------------------------
-    skf = StratifiedKFold(n_splits=2, shuffle=True, random_state=17)
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=17)
     kappa_fold_rows: List[Dict[str, float]] = []
     for fold_idx, (tr_idx, te_idx) in enumerate(skf.split(np.zeros_like(y_all_pid), y_all_pid), start=1):
         batch_tr = _slice_batch(probe, tr_idx)

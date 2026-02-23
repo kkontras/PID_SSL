@@ -1,6 +1,6 @@
 # PID-SAR-3++ SSL Main Results
 
-This document is the primary SSL benchmark report for PID-SAR-3++. It contains the corrected evaluation protocol, the core comparison sequence, and the downstream pair->target benchmark used for method ranking; tuning sweeps and supporting diagnostics are moved to `docs/PID_SAR3_SSL_APPENDIX_ABLATIONS.md`.
+This document reports the primary SSL results for PID-SAR-3++. It presents the corrected evaluation protocol, a compact set of representation-level diagnostics, and the source->target downstream benchmark used for method ranking. Hyperparameter sweeps, supplementary latent-proxy analyses, and broader ablations are reported separately in `docs/PID_SAR3_SSL_APPENDIX_ABLATIONS.md`.
 
 ## 6. SSL Results (Main Results)
 
@@ -8,43 +8,19 @@ The section numbering below is preserved from the original SSL report to keep ta
 
 ### 6.1 Evaluation Protocol (Important Correction)
 
-Earlier SSL comparisons used different dataset seeds for train/test probe generators. In this dataset, the seed changes:
+Earlier comparisons used different dataset seeds for probe-train and probe-test generators. In PID-SAR-3++, changing the dataset seed changes the fixed projection operators, the fixed synergy network, and the de-leakage maps, so cross-seed probing evaluates transfer across different observation dictionaries rather than ordinary generalization to new samples from the same world.
 
-- fixed projection matrices
-- fixed synergy MLP
-- de-leakage maps
-
-So cross-seed probing unintentionally tested transfer across different observation dictionaries, not just generalization to new samples.
-
-Corrected protocol used here:
-
-- same dataset seed for SSL training and probe splits
-- different sampled examples for train/test
-- frozen encoders
-- concatenate `[h1,h2,h3]`
-- linear probes on held-out data
+All results reported here therefore use a same-world split: the SSL model and probe splits share the same dataset seed, while train/test probe examples are sampled independently. Encoders are frozen at evaluation time, the three modality embeddings are concatenated as `[h_1,h_2,h_3]`, and linear probes are fit on held-out data.
 
 Implementation:
 
 - `tests/test_pid_sar3_ssl_fused_confusions.py`
 
-### 6.1.1 Main-Results Reporting Contract (New)
+### 6.1.1 Main-Results Reporting Contract
 
-To reduce “leaderboard dump” behavior, the main results are now defined as a small set of decision metrics reported with uncertainty across repeated runs, not a single seed snapshot.
+To avoid presenting the benchmark as a single-seed leaderboard, the main results are defined as a small set of decision metrics reported with uncertainty across repeated runs. In practice, we report the sample mean \(\bar{x}\) and a normal-approximation interval \(\bar{x} \pm 1.96\,s/\sqrt{n}\), where \(s\) is the sample standard deviation over repeated runs and \(n\) is the number of runs.
 
-Main-results requirements:
-
-- report repeated runs across dataset worlds and optimization seeds (not one run)
-- report mean and 95% CI for the primary metrics
-- keep one primary ranking target and a small number of failure-mode metrics
-- move tuning sweeps and broad diagnostic tables to `docs/PID_SAR3_SSL_APPENDIX_ABLATIONS.md`
-
-Primary decision metrics (current fused comparison stage):
-
-- downstream task score for the declared primary benchmark (when available in the active harness)
-- redundancy recall (`R` rows in PID confusion)
-- `R -> S` leakage from PID confusions
-- matched `R/S` centroid overlap (geometry pathology metric)
+The main text prioritizes one ranking target (the source->target matrix in Section `6.8.1`) together with a small number of failure-mode diagnostics, while broader sweeps and auxiliary tables are moved to the appendix.
 
 Implementation artifact (repeated-seed summary):
 
@@ -54,7 +30,7 @@ Implementation artifact (repeated-seed summary):
 
 ### 6.1.2 Repeated-Seed Secondary Diagnostics Snapshot (Quick CPU Run, `n=3`)
 
-We ran the new repeated-seed summary harness (`test_main_results_four_models_repeated_seed_summary`) on February 23, 2026 in a short CPU regime (`3` dataset worlds / optimization seeds, `140` SSL steps). This is not the final benchmark, but it is enough to replace single-seed claims with uncertainty-aware summaries.
+We ran the repeated-seed summary harness (`test_main_results_four_models_repeated_seed_summary`) on February 23, 2026 in a short CPU regime (`n=3` dataset worlds / optimization seeds; `140` SSL steps). This run is not the final benchmark, but it is sufficient to replace single-seed statements with uncertainty-aware summaries.
 
 Secondary diagnostics (mean [95% CI]):
 
@@ -65,7 +41,7 @@ Secondary diagnostics (mean [95% CI]):
 | C: TRIANGLE | 0.606 [0.581, 0.631] | 0.642 [0.627, 0.657] | 0.186 [0.154, 0.217] | 0.936 [0.912, 0.960] |
 | D: ConFu | 0.557 [0.551, 0.562] | 0.508 [0.476, 0.539] | 0.202 [0.188, 0.217] | 0.928 [0.909, 0.948] |
 
-What this changes in the interpretation:
+Interpretation of the secondary diagnostics snapshot:
 
 - **TRIANGLE remains strongest in this short regime** on family classification and `R` recall, and it also has the lowest mean `R -> S` leakage among the four in this run.
 - **Unimodal SimCLR still has much lower matched `R/S` centroid overlap** than the cross-modal methods (better geometry on this pathology metric), so the story is not a single scalar ranking.
@@ -77,18 +53,16 @@ Short-run caveat:
 
 ### 6.1.3 Lead Readout: Do The Encoders Capture U / R / S?
 
-Before showing PID-10 confusions, the main results should lead with a subset-based family classification probe on frozen features:
+Before any PID-label confusion matrix is shown, we report a subset-based family classification probe on frozen features. The probe evaluates subsets `x1`, `x2`, `x3`, `x12`, `x13`, `x23`, and `x123`, and asks whether the representation linearly separates the three PID families (unique, redundancy, synergy).
 
-- subsets: `x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`
-- metrics: `Family-3` accuracy, `Family-3` macro-F1, and one-vs-rest `F1` for `U`, `R`, `S`
-- purpose: answer the direct representation question first ("what does each subset encode about unique/redundancy/synergy families?")
+For clarity, if precision and recall are denoted by \(P\) and \(R\), the class-wise F1 score is \(F_1 = 2PR/(P+R)\). The reported family macro-F1 is the unweighted mean \(\mathrm{macro\text{-}F1} = \frac{1}{3}\sum_{c\in\{U,R,S\}}F_1^{(c)}\), and the `U`/`R`/`S` columns report one-vs-rest scores \(F_1^{(c)}\) for each family.
 
 Artifacts (4-model fused comparison):
 
 - `test_outputs/pid_sar3_ssl_fused_confusions/subset_family_probe_heatmaps_four_models.png`
 - `test_outputs/pid_sar3_ssl_fused_confusions/fused_frozen_four_models_subset_predictors.csv`
 
-This readout should be presented before PID-10 leaderboards because it is a cleaner representation-level diagnostic and makes the U/R/S tradeoffs visible without collapsing them into one class label metric.
+We place this readout first because it is a direct representation-level diagnostic: it reveals U/R/S tradeoffs without collapsing them into a single 10-way PID label metric.
 
 Quick snapshot from the current 4-model fused run (`x123` subset only; full subset grid is in the heatmap/CSV above):
 
@@ -99,7 +73,18 @@ Quick snapshot from the current 4-model fused run (`x123` subset only; full subs
 | C: TRIANGLE | 0.619 | 0.611 | 0.636 | 0.664 | 0.533 |
 | D: ConFu | 0.589 | 0.582 | 0.583 | 0.634 | 0.530 |
 
-This table is intentionally not the full story. The full subset matrix (`x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`) is the point of the diagnostic, because it shows which methods improve specifically when more modalities are exposed.
+This `x123` table is only a compact snapshot. The full subset matrix (`x1`, `x2`, `x3`, `x12`, `x13`, `x23`, `x123`) is the key diagnostic because it shows which methods improve specifically when additional modalities are exposed.
+
+### 6.1.4 Chance-Centered Alternatives To F1 (Recommendation)
+
+If we want a metric whose random baseline is exactly \(0\) without applying a post-hoc skill transform, the most practical replacement for F1 in this section is **Cohen's kappa**, defined as \(\kappa = (p_o - p_e)/(1 - p_e)\), where \(p_o\) is observed agreement and \(p_e\) is chance agreement under the empirical marginals. By construction, chance-level performance gives \(\kappa \approx 0\).
+
+Two additional options are also reasonable:
+
+- **Matthews correlation coefficient (MCC)** for binary tasks (and its multiclass extension), which is also centered near \(0\) at chance.
+- **Chance-corrected F1 (F1-skill)**, e.g. \(F_{1,\mathrm{skill}} = \frac{F_1 - F_{1,\mathrm{rand}}}{1 - F_{1,\mathrm{rand}}}\); for balanced binary tasks with \(F_{1,\mathrm{rand}} \approx 0.5\), this reduces to \(F_{1,\mathrm{skill}} \approx 2F_1 - 1\).
+
+For the source->target benchmark in Section `6.8.1`, a good reporting practice is to keep macro-F1 for comparability with prior plots and add \(\kappa\) as the chance-centered primary scalar.
 
 ### 6.2 Legacy Fused Classification Check (Context Only)
 
@@ -161,15 +146,9 @@ Short conclusion:
 
 ### 6.8 Tuned Long-Run Downstream Benchmark (Primary Results)
 
-This section is the primary SSL benchmark result in this document. The ranking target is the **source->target modality prediction matrix** in Section `6.8.1`, not PID-label classification and not latent-proxy `R²` tables.
+This section contains the primary SSL benchmark result. The ranking target is the **source->target modality prediction matrix** in Section `6.8.1`, rather than PID-label classification or latent-proxy `R^2` tables.
 
-Tuning protocol:
-
-- same corrected same-world split
-- `probe_train` for regressor fit
-- `probe_val` for model/hyperparameter selection
-- `probe_test` for final report
-- selection metric used in the original tuning run: validation mean `R²` over latent proxy tasks (`y_macro_r2`)
+The tuned runs used a train/validation/test downstream split with validation-based model selection. In the original tuning run, hyperparameters were selected using validation mean latent-proxy performance (`y_macro_r2`); this is retained for provenance, but the headline evaluation reported here is source->target prediction.
 
 Methods:
 
@@ -179,37 +158,19 @@ Methods:
 4. `D`: ConFu
 5. `E`: directional predictive hybrid (`[h_i,h_j] -> h_k`)
 
-Supplementary latent-proxy (`y_*`) regression artifacts are kept for interpretability and tuning provenance, but they are secondary and are discussed in `docs/PID_SAR3_SSL_APPENDIX_ABLATIONS.md`.
+Supplementary latent-proxy (`y_*`) regression artifacts are retained for interpretability and tuning provenance, but they are secondary and are discussed in `docs/PID_SAR3_SSL_APPENDIX_ABLATIONS.md`.
 
-### 6.8.1 Rotated Pair->Target Modality Classification (Primary Metric)
+### 6.8.1 Source->Target Modality Prediction (Primary Benchmark)
 
-The main downstream benchmark should use modalities directly:
+The main downstream benchmark uses modalities directly. Given frozen encoder features for a source subset, we predict a target modality observation. The principal slice is the rotated pair->target setting (`23->1`, `13->2`, `12->3`), but the primary result is the full source->target matrix over sources in `{1,2,3,12,13,23,123}` and targets in `{1,2,3}`.
 
-- input: **two modalities**
-- target: **the third modality**
-- frozen encoders
-- rotate across all three directions: `23 -> 1`, `13 -> 2`, `12 -> 3`
+This design avoids making a hand-crafted latent proxy the primary target. Instead, it asks whether the learned representation supports actual cross-modal prediction.
 
-This avoids introducing a separate hand-designed target variable as the primary task. Instead, we test whether the pretrained representation supports actual cross-modal prediction.
+Task construction is dimension-wise binary prediction on the target modality. For each target dimension, we threshold the raw target value at the train-split median (which yields approximately balanced classes), fit a linear classifier from frozen source features, and average performance across target dimensions.
 
-Task construction (classification, random ≈ 0 baseline on the normalized score):
+Let \(F_{1,d}\) denote the binary F1 score for target dimension \(d\). The reported macro-F1 is \(\frac{1}{D}\sum_{d=1}^{D}F_{1,d}\). We also report Cohen's \(\kappa\), \(\kappa = (p_o-p_e)/(1-p_e)\), as a chance-centered metric (\(\kappa \approx 0\) at random performance), and the normalized score \(F_{1,\mathrm{skill}} = (F_1-0.5)/0.5 = 2F_1-1\) for the median-balanced binary tasks.
 
-- use frozen features of the two input modalities (concatenated)
-- predict the target modality observation vector `x_target`
-- convert each target dimension into a binary classification task by thresholding at the **train median** (per dimension)
-- fit a linear classifier per target dimension
-- average across target dimensions
-
-Reported metrics:
-
-- `macro-F1` (averaged over target dimensions)
-- `κ` (Cohen's kappa; random near `0`)
-- `F1-skill = (F1 - 0.5) / 0.5` for the median-balanced binary tasks, so **random ≈ 0**
-
-We evaluate:
-
-- overall per rotation (`23->1`, `13->2`, `12->3`)
-- per PID atom within each rotation (full `PID x rotation` table/heatmap)
+Evaluation is reported at three levels: (i) the full source->target matrix, (ii) the rotated pair->target slice, and (iii) PID-stratified heatmaps for the rotated slice.
 
 Primary pair->target artifacts:
 
@@ -221,12 +182,12 @@ Primary pair->target artifacts:
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1_heatmaps.png`
 
-Primary result for this section:
+Presentation order in this section:
 
 - **Figure 14 + Table 7b (the full all-source->target matrix)** are the main benchmark result.
-- **Table 7** is a focused excerpt of the three rotated pair->target tasks (`23->1`, `13->2`, `12->3`) and should be read as a slice of `7b`, not as a separate benchmark.
+- **Table 7** is a focused excerpt of the three rotated pair->target tasks (`23->1`, `13->2`, `12->3`) and should be read as a slice of `7b`.
 
-Before the full matrix, a compact grouped summary helps orient the reader.
+Before the full matrix, we report a grouped summary to separate near-ceiling sanity checks from genuinely discriminative cross-modal tasks.
 
 #### Table 7a. Grouped Summary Of The All Source->Target Matrix (macro-F1 averages over task groups; A-D only)
 
@@ -239,7 +200,9 @@ Source: `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_sou
 | C: TRIANGLE | 0.986 | 0.615 | 0.651 | 0.982 | 0.979 |
 | D: ConFu | 0.986 | 0.600 | 0.629 | 0.982 | 0.979 |
 
-Interpretation of Table 7a:
+For each model \(m\) and task group \(G\), the grouped score is the mean \(\bar{F}_{m,G} = \frac{1}{|G|}\sum_{t\in G} F_1(m,t)\), where \(t\) indexes source->target tasks in that group.
+
+Main findings from Table 7a:
 
 - Self-prediction and overcomplete settings (`pair->member`, `123->target`) are near-ceiling for all methods, so they are sanity checks, not ranking metrics.
 - The ranking signal lives in the **cross-modal** groups, especially **pair->heldout target**.
@@ -257,7 +220,7 @@ Interpretation of Table 7a:
 
 *Figure 14. Main downstream result: all source->target rotations (`1/2/3/12/13/23/123 -> 1/2/3`) reported as macro-F1 for A-D (frozen encoders). Includes self-prediction rows such as `1->1` and cross-modal rows such as `2->1`.*
 
-#### Table 7. Focused Excerpt From The Main Matrix: Rotated Pair->Target Downstream Results (frozen encoders, held-out test)
+#### Table 7. Focused Excerpt From The Main Matrix: Rotated Pair->Target Results (frozen encoders, held-out test)
 
 Sources:
 
@@ -277,10 +240,9 @@ Rotation-level highlights:
 - `13->2`: **C** is strongest (`0.655`)
 - `12->3`: **C** is strongest (`0.653`)
 
-What this clarifies (for the pair->target slice):
+Interpretation of the rotated pair->target slice:
 
-- This benchmark is much closer to the intended multimodal question than PID-label classification or latent `y_*` probes alone.
-- **Cross-modal methods now clearly outperform unimodal SimCLR** on the true pair->target task (A is near-random on the normalized scale).
+- **Cross-modal methods clearly outperform unimodal SimCLR** on the pair->target tasks (model A remains near the cross-modal floor).
 - **TRIANGLE is the strongest method across two of the three rotations** (`13->2`, `12->3`) when reporting macro-F1 directly.
 - **ConFu** is competitive and strongest on one rotation (`23->1`).
 - **Pairwise InfoNCE** is consistently strong and clearly above unimodal SimCLR on all three rotations.
@@ -319,7 +281,7 @@ Reading guide (how to use the main matrix):
 - `2->1`, `3->1`, `1->2`, ... are single-modality cross-modal transfers.
 - `23->1`, `13->2`, `12->3` are the main rotated pair->target tasks summarized in Table 7.
 
-Why `7b` should be treated as the main result (not just the rotated subset):
+Why `7b` is the main result (rather than only the rotated subset):
 
 - It shows the **full cross-modal behavior surface**, not only three selected tasks.
 - It separates ceiling sanity checks (`1->1`, `12->1`, `123->1`, etc.) from the tasks that actually rank methods.

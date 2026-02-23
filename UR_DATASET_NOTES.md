@@ -545,13 +545,50 @@ The persistent `Rij <-> Sij->k` confusion suggests the current contrastive objec
 
 The next objective variants should be judged by whether they reduce those specific off-diagonal bands in Figure 8 **and** lower the matched `Rij`/`Sij->k` centroid cosine in Figure 10.
 
+### 6.8 Related Higher-Order Multimodal Alignment Ideas (TRIANGLE, ConFu)
+
+Two recent multimodal alignment papers are directly relevant to the failure mode observed here (`Rij <-> Sij->k` overlap/confusion):
+
+1. **TRIANGLE** (Cicchetti, Grassucci, Comminiello): *A TRIANGLE Enables Multimodal Alignment Beyond Cosine Similarity*
+2. **ConFu** (Koutoupis et al.): *The More, the Merrier: Contrastive Fusion for Higher-Order Multimodal Alignment*
+
+Why they matter for this benchmark:
+
+- Our current pairwise InfoNCE baseline (Model B) improves some latent linear recoverability, but it also increases matched `Rij`/`Sij->k` centroid overlap in the fused representation space.
+- This suggests pairwise similarity alone is not enough to separate:
+  - pairwise shared structure (redundancy)
+  - higher-order / directional structure (synergy)
+
+How these papers map onto our diagnostics:
+
+- **TRIANGLE-style idea (joint geometric alignment beyond pairwise cosine)**
+  - relevant to Figure 10 because our current diagnostics already expose a geometric overlap problem
+  - a triangle-area / joint-geometry similarity may help preserve tri-modal structure without over-collapsing matched `Rij` and `Sij->k` classes
+  - concrete test in this benchmark: compare matched `Rij`/`Sij->k` centroid cosine and nearest-centroid pair accuracy before/after replacing pairwise cosine with a TRIANGLE-like similarity
+
+- **ConFu-style idea (fused higher-order contrastive term)**
+  - directly relevant to the `Rij <-> Sij->k` confusions because ConFu explicitly introduces fused-modality contrastive alignment (beyond pairwise-only terms)
+  - this is a natural candidate for reducing the ambiguity between pairwise redundancy and directional synergy by modeling higher-order interactions while preserving pairwise correspondence
+  - concrete test in this benchmark: add fused terms such as `f(h_i,h_j)` aligned with `h_k` and evaluate whether Figure 8 off-diagonal `Rij <-> Sij->k` bands shrink
+
+What would count as improvement in our analysis (not just aggregate accuracy):
+
+- lower matched `Rij`/`Sij->k` centroid cosine in Figure 10 / Table 3
+- better matched-pair nearest-centroid separability (`R12` vs `S12->3`, etc.)
+- reduced `Rij <-> Sij->k` off-diagonal mass in the PID-10 confusion matrix (Figure 8)
+- ideally, improved latent-target linear recoverability without sacrificing PID-term separability
+
+These two papers therefore fit naturally into the next iteration of this benchmark: they are not just "more baselines", but targeted responses to the specific geometry/pathology we have already measured.
+
 Promising next directions:
 
 1. Add a predictive head `([h_i,h_j] -> h_k)` to explicitly model directional structure.
 2. Use a hybrid loss: pairwise contrastive + target prediction, then re-check the `Rij <-> Sij->k` confusion bands.
-3. Probe `h` vs `z` separately (encoder output vs projector output), since SimCLR-style projectors can hide linearly decodable latent structure.
+3. Implement a TRIANGLE-like joint tri-modal similarity and compare Figure 8 / Figure 10 directly.
+4. Implement a ConFu-style fused-modality contrastive term and test whether matched `Rij`/`Sij->k` overlap decreases.
+5. Probe `h` vs `z` separately (encoder output vs projector output), since SimCLR-style projectors can hide linearly decodable latent structure.
 
-### 6.8 Reproducing the Revised SSL Comparison
+### 6.9 Reproducing the Revised SSL Comparison
 
 ```bash
 python - <<'PY'

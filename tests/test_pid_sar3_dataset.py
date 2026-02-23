@@ -1071,8 +1071,6 @@ if __name__ == "__main__":
     test_plot_ur_compact_signature_grid_over_sigma()
     test_plot_ur_hyperparameter_sweeps_compact()
     test_plot_cca_all_pairs_ur()
-    test_plot_ur_intuition_scatter_examples()
-    test_plot_r123_pca_all_pairs()
     test_plot_cca_boosting_mechanisms_summary()
     test_plot_downstream_task_boosting_summary()
     test_plot_synergy_task_gap_boosting_summary()

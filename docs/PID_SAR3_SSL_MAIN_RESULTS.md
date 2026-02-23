@@ -287,6 +287,30 @@ Primary pair->target artifacts:
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1_heatmaps.png`
 
+Primary result for this section:
+
+- **Figure 14 + Table 7b (the full all-source->target matrix)** are the main benchmark result.
+- **Table 7** is a focused excerpt of the three rotated pair->target tasks (`23->1`, `13->2`, `12->3`) and should be read as a slice of `7b`, not as a separate benchmark.
+
+Before the full matrix, a compact grouped summary helps orient the reader.
+
+#### Table 7a. Grouped Summary Of The All Source->Target Matrix (macro-F1 averages over task groups; A-D only)
+
+Source: `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
+
+| Model | self `1->1/2->2/3->3` | single cross-modal (`1->2`, etc.) | pair->heldout target (`23->1`, `13->2`, `12->3`) | pair->member target (`12->1`, etc.) | `123->target` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A: 3x unimodal SimCLR | 0.987 | 0.511 | 0.516 | 0.984 | 0.981 |
+| B: pairwise InfoNCE | 0.986 | 0.614 | 0.639 | 0.982 | 0.978 |
+| C: TRIANGLE | 0.986 | 0.615 | 0.651 | 0.982 | 0.979 |
+| D: ConFu | 0.986 | 0.600 | 0.629 | 0.982 | 0.979 |
+
+Interpretation of Table 7a:
+
+- Self-prediction and overcomplete settings (`pair->member`, `123->target`) are near-ceiling for all methods, so they are sanity checks, not ranking metrics.
+- The ranking signal lives in the **cross-modal** groups, especially **pair->heldout target**.
+- `C: TRIANGLE` is strongest on the grouped pair->heldout target average; `B: pairwise InfoNCE` is close; `D: ConFu` remains competitive; `A` is near the cross-modal floor.
+
 ![Rotated pair->target downstream summary](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.png)
 
 *Figure 12. Main downstream benchmark: rotated pair->target modality classification with frozen encoders. Left: rotation-averaged `F1-skill`. Middle: heuristic “applicable PID” average. Right: applicability gap (`applicable - non-applicable`).*
@@ -297,9 +321,9 @@ Primary pair->target artifacts:
 
 ![All source->target macro-F1 heatmaps](test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1_heatmaps.png)
 
-*Figure 14. All source->target rotations (`1/2/3/12/13/23/123 -> 1/2/3`) reported as macro-F1 for A-D (frozen encoders). Includes self-prediction rows such as `1->1` and cross-modal rows such as `2->1`.*
+*Figure 14. Main downstream result: all source->target rotations (`1/2/3/12/13/23/123 -> 1/2/3`) reported as macro-F1 for A-D (frozen encoders). Includes self-prediction rows such as `1->1` and cross-modal rows such as `2->1`.*
 
-#### Table 7. Rotated Pair->Target Downstream Results (frozen encoders, held-out test; primary report uses per-rotation macro-F1)
+#### Table 7. Focused Excerpt From The Main Matrix: Rotated Pair->Target Downstream Results (frozen encoders, held-out test)
 
 Sources:
 
@@ -319,7 +343,7 @@ Rotation-level highlights:
 - `13->2`: **C** is strongest (`0.655`)
 - `12->3`: **C** is strongest (`0.653`)
 
-What this clarifies:
+What this clarifies (for the pair->target slice):
 
 - This benchmark is much closer to the intended multimodal question than PID-label classification or latent `y_*` probes alone.
 - **Cross-modal methods now clearly outperform unimodal SimCLR** on the true pair->target task (A is near-random on the normalized scale).
@@ -327,7 +351,7 @@ What this clarifies:
 - **ConFu** is competitive and strongest on one rotation (`23->1`).
 - **Pairwise InfoNCE** is consistently strong and clearly above unimodal SimCLR on all three rotations.
 
-#### Table 7b. All Source->Target Rotations (macro-F1, A-D only)
+#### Table 7b. Main Result Matrix: All Source->Target Rotations (macro-F1, A-D only)
 
 Source: `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_source_to_target_macro_f1.csv`
 
@@ -355,11 +379,17 @@ Source: `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_all_sou
 | `23->3` | 0.984 | 0.982 | 0.982 | 0.983 |
 | `123->3` | 0.981 | 0.978 | 0.980 | 0.980 |
 
-Reading guide:
+Reading guide (how to use the main matrix):
 
 - `1->1`, `2->2`, `3->3` are self-prediction sanity checks.
 - `2->1`, `3->1`, `1->2`, ... are single-modality cross-modal transfers.
-- `23->1`, `13->2`, `12->3` are the main rotated pair->target tasks from Table 7.
+- `23->1`, `13->2`, `12->3` are the main rotated pair->target tasks summarized in Table 7.
+
+Why `7b` should be treated as the main result (not just the rotated subset):
+
+- It shows the **full cross-modal behavior surface**, not only three selected tasks.
+- It separates ceiling sanity checks (`1->1`, `12->1`, `123->1`, etc.) from the tasks that actually rank methods.
+- It makes it harder to overfit the narrative to a small subset of rotations.
 
 Important note on the heuristic “applicable PID” averages:
 

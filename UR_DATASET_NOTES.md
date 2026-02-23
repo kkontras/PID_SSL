@@ -663,38 +663,39 @@ Primary pair->target artifacts:
 
 *Figure 13. Full `PID x rotation` pair->target downstream scores (`F1-skill`; random ≈ 0) for each method.*
 
-#### Table 7. Rotated Pair->Target Downstream Results (frozen encoders, held-out test)
+#### Table 7. Rotated Pair->Target Downstream Results (frozen encoders, held-out test; primary report uses per-rotation macro-F1)
 
 Sources:
 
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_summary.csv`
 - `test_outputs/pid_sar3_ssl_fused_confusions/tuned_long_steps_600_pair_to_target_overall_rotation_scores.csv`
 
-| Model | rotation-avg macro-F1 | rotation-avg `F1-skill` | rotation-avg `κ` |
+| Model | `23->1` macro-F1 | `13->2` macro-F1 | `12->3` macro-F1 |
 | --- | ---: | ---: | ---: |
-| A: 3x unimodal SimCLR | 0.517 | 0.035 | 0.034 |
-| B: pairwise InfoNCE | 0.639 | 0.277 | 0.280 |
-| C: TRIANGLE exact | 0.651 | 0.301 | 0.303 |
-| D: ConFu fusion-head | 0.629 | 0.257 | 0.258 |
-| E: directional predictive hybrid | **0.653** | **0.305** | **0.303** |
+| A: 3x unimodal SimCLR | 0.520 | 0.518 | 0.514 |
+| B: pairwise InfoNCE | 0.628 | 0.649 | 0.640 |
+| C: TRIANGLE exact | 0.643 | 0.655 | 0.653 |
+| D: ConFu fusion-head | 0.647 | 0.599 | 0.640 |
 
 Rotation-level highlights:
 
-- `13->2`: **E** is strongest (`F1-skill = 0.329`)
-- `12->3`: **E** is strongest (`0.313`)
-- `23->1`: **D** is strongest (`0.294`), with `C` close (`0.287`)
+- `23->1`: **D** is strongest on macro-F1 (`0.647`), with `C` close (`0.643`)
+- `13->2`: **C** is strongest (`0.655`)
+- `12->3`: **C** is strongest (`0.653`)
 
 What this clarifies:
 
 - This benchmark is much closer to the intended multimodal question than PID-label classification or latent `y_*` probes alone.
 - **Cross-modal methods now clearly outperform unimodal SimCLR** on the true pair->target task (A is near-random on the normalized scale).
-- **TRIANGLE and the directional predictive hybrid are the strongest overall** in this pair->target setting, with **E** narrowly best in rotation-averaged `F1-skill`.
-- **ConFu fusion-head** is competitive and strong, especially on one rotation (`23->1`).
+- **TRIANGLE exact is the strongest method across two of the three rotations** (`13->2`, `12->3`) when reporting macro-F1 directly.
+- **ConFu fusion-head** is competitive and strongest on one rotation (`23->1`).
+- **Pairwise InfoNCE** is consistently strong and clearly above unimodal SimCLR on all three rotations.
 
 Important note on the heuristic “applicable PID” averages:
 
 - We also computed a simple heuristic split of PID atoms into “applicable / non-applicable” for each rotation, but the averages are noisy and not yet a reliable primary metric.
 - The full `PID x rotation` heatmaps are more informative than the heuristic scalar summary.
+- We also tested a directional predictive hybrid (`E`) in exploratory runs, but it is omitted from the primary table here per the current reporting preference.
 
 ### 6.8.2 Downstream Proxy Classification on `y_*` (Supplementary Diagnostic)
 

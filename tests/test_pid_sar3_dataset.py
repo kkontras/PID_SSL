@@ -186,7 +186,7 @@ def _generate_fixed_pid(gen: PIDSar3DatasetGenerator, pid_id: int, n: int) -> Di
 
 def _savefig(path: Path) -> None:
     plt.tight_layout()
-    plt.savefig(path, dpi=140)
+    plt.savefig(path, dpi=140, bbox_inches="tight")
     plt.close()
 
 
@@ -643,13 +643,13 @@ def test_plot_cca_boosting_mechanisms_summary():
 
     # Heatmap summary for the four probe atoms across scenarios.
     metric_mat = np.asarray(metric_matrix, dtype=np.float32).reshape(len(scenarios), len(probe_pids))
-    fig, ax = plt.subplots(figsize=(9.0, 4.8))
+    fig, ax = plt.subplots(figsize=(9.8, 5.2))
     im = ax.imshow(metric_mat, aspect="auto", cmap="cividis")
     ax.set_xticks(range(len(probe_pids)))
-    ax.set_xticklabels([label for _, label in probe_pids])
+    ax.set_xticklabels(["U1", "R12", "R123", "S12->3"], rotation=0)
     ax.set_yticks(range(len(scenarios)))
     ax.set_yticklabels([label for label, _ in scenarios])
-    ax.set_title("Holdout CCA summary under targeted pid boosts (sigma=0.45, rho=0.5, hop=2)")
+    ax.set_title("Holdout CCA summary under targeted boosts\n(sigma=0.45, rho=0.5, hop=2)")
     for i in range(metric_mat.shape[0]):
         for j in range(metric_mat.shape[1]):
             ax.text(j, i, f"{metric_mat[i, j]:.2f}", ha="center", va="center", color="white", fontsize=8)
@@ -733,10 +733,16 @@ def test_plot_downstream_task_boosting_summary():
         for task, score in zip(task_names, vals):
             rows.append({"scenario": label, "task": task, "score": float(score)})
 
-    fig, ax = plt.subplots(figsize=(10.2, 4.8))
+    pretty_task_labels = [
+        "Y_U1\nfrom x1",
+        "Y_R12\nfrom [x1,x2]",
+        "Y_R123\nfrom [x1,x2,x3]",
+        "Y_S12->3\nfrom x3",
+    ]
+    fig, ax = plt.subplots(figsize=(11.6, 5.4))
     im = ax.imshow(metrics, aspect="auto", cmap="viridis")
     ax.set_xticks(range(len(task_names)))
-    ax.set_xticklabels(task_names, rotation=15, ha="right")
+    ax.set_xticklabels(pretty_task_labels, rotation=0, ha="center")
     ax.set_yticks(range(len(scenarios)))
     ax.set_yticklabels([s for s, _ in scenarios])
     ax.set_title("Downstream task validation under targeted boosts")
@@ -744,6 +750,7 @@ def test_plot_downstream_task_boosting_summary():
         for j in range(metrics.shape[1]):
             ax.text(j, i, f"{metrics[i, j]:.2f}", ha="center", va="center", color="white", fontsize=8)
     fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
+    fig.subplots_adjust(bottom=0.18)
     _savefig(out_dir / "downstream_task_boosting_summary.png")
 
     csv_path = out_dir / "downstream_task_boosting_summary.csv"
@@ -814,7 +821,7 @@ def test_plot_synergy_task_gap_boosting_summary():
         vals_gap.append(gap)
         vals_x3.append(float(r2_x3))
 
-    fig, axes = plt.subplots(1, 2, figsize=(10.8, 4.4))
+    fig, axes = plt.subplots(1, 2, figsize=(11.6, 4.8))
     x = np.arange(len(scenarios))
     labels = [s for s, _ in scenarios]
 
@@ -823,14 +830,15 @@ def test_plot_synergy_task_gap_boosting_summary():
     axes[0].set_title("S12->3 synergy probe gap\nR²([x1,x2]->y) - max(R²(x1->y), R²(x2->y))")
     axes[0].set_ylabel("gap")
     axes[0].set_xticks(x)
-    axes[0].set_xticklabels(labels, rotation=20, ha="right")
+    axes[0].set_xticklabels(labels, rotation=28, ha="right")
     axes[0].grid(axis="y", alpha=0.25)
 
     axes[1].bar(x, vals_x3, color="#f58518", alpha=0.85)
     axes[1].set_title("S12->3 target-view decode (control)\nR²(x3 -> y_s12_3)")
     axes[1].set_ylabel("R²")
     axes[1].set_xticks(x)
-    axes[1].set_xticklabels(labels, rotation=20, ha="right")
+    axes[1].set_xticklabels(labels, rotation=28, ha="right")
+    fig.subplots_adjust(bottom=0.22)
     axes[1].grid(axis="y", alpha=0.25)
 
     _savefig(out_dir / "synergy_task_gap_boosting_summary.png")
@@ -942,7 +950,7 @@ def test_plot_single_atom_correctness_validation():
     # Plot as four compact panels (one per correctness set) to avoid mixing incomparable metrics.
     atom_order = ["U1", "R12", "R123", "S12->3"]
     atom_rows = {a: [r for r in rows if r["atom"] == a] for a in atom_order}
-    fig, axes = plt.subplots(2, 2, figsize=(13.2, 9.0))
+    fig, axes = plt.subplots(2, 2, figsize=(14.8, 10.6))
     axes = axes.ravel()
     palette = {
         "main": "#4c78a8",
@@ -953,10 +961,24 @@ def test_plot_single_atom_correctness_validation():
     }
     for ax, atom in zip(axes, atom_order):
         atom_metrics = atom_rows[atom]
-        labels = [m["metric"] for m in atom_metrics]
+        raw_labels = [m["metric"] for m in atom_metrics]
+        labels = []
+        for lbl in raw_labels:
+            lbl = (
+                lbl.replace("R2(", "R2(\n")
+                .replace(") control", ")\ncontrol")
+                .replace(") source single", ")\nsource single")
+                .replace(") source joint", ")\nsource joint")
+                .replace("joint gain over best single", "joint gain\nover best single")
+                .replace("source joint gain", "source joint\ngain")
+                .replace(" | [x1,x2,x3])", " |\n[x1,x2,x3])")
+                .replace(" | [x1,x2])", " |\n[x1,x2])")
+                .replace(" target decode", "\ntarget decode")
+            )
+            labels.append(lbl)
         vals = np.array([m["score"] for m in atom_metrics], dtype=np.float32)
         colors = []
-        for lbl in labels:
+        for lbl in raw_labels:
             if "control" in lbl:
                 colors.append(palette["control"])
             elif "joint gain" in lbl or "source joint gain" in lbl:
@@ -973,17 +995,18 @@ def test_plot_single_atom_correctness_validation():
         ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
         ax.set_title(f"{atom} correctness set (low noise)")
         ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=18, ha="right", fontsize=8)
+        ax.set_xticklabels(labels, rotation=0, ha="center", fontsize=7.5)
         ax.grid(axis="y", alpha=0.25)
         for i, v in enumerate(vals):
-            ax.text(i, v + (0.015 if v >= 0 else -0.04), f"{v:.2f}", ha="center", va="bottom" if v >= 0 else "top", fontsize=8)
+            ax.text(i, v + (0.015 if v >= 0 else -0.04), f"{v:.2f}", ha="center", va="bottom" if v >= 0 else "top", fontsize=7.5)
 
         if atom in ("U1", "R12", "R123"):
             ax.set_ylim(min(-0.15, float(np.min(vals)) - 0.05), 1.05)
         else:
             ax.set_ylim(min(-0.25, float(np.min(vals)) - 0.05), max(1.05, float(np.max(vals)) + 0.08))
 
-    fig.suptitle("Single-atom correctness validation (low noise): atom-aligned tasks should be near-ceiling")
+    fig.suptitle("Single-atom correctness validation (low noise): atom-aligned tasks should be near-ceiling", y=0.995)
+    fig.subplots_adjust(hspace=0.50, wspace=0.22, bottom=0.12)
     _savefig(out_dir / "single_atom_correctness_validation.png")
 
     csv_path = out_dir / "single_atom_correctness_validation.csv"
@@ -1225,7 +1248,6 @@ if __name__ == "__main__":
     test_plot_atom_gain_controls_ur()
     test_plot_ur_compact_signature_grid_over_sigma()
     test_plot_ur_hyperparameter_sweeps_compact()
-    test_plot_cca_all_pairs_ur()
     test_plot_single_atom_correctness_validation()
     test_plot_cca_boosting_mechanisms_summary()
     test_plot_downstream_task_boosting_summary()

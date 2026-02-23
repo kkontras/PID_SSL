@@ -115,26 +115,7 @@ This plot adds variability to the same `D(i,j)` story. It shows repeated-batch d
 
 This figure links the equations directly to `D`. Increasing `rho` in $r_i=\sqrt{\rho}\,r+\sqrt{1-\rho}\,\eta_i$ increases shared latent content and should increase `D(1,2)` for `R12`. The norm panel shows how `alpha` and `sigma` change raw scale in $x_k=\mathrm{signal}_k+\varepsilon_k$.
 
-### 3.3 CCA Redundancy Geometry (Complementary to `D`)
-
-![CCA all-pairs sigma=0.15](test_outputs/pid_sar3/cca_all_pairs_ur_sigma_0p15.png)
-
-![CCA all-pairs sigma=0.9](test_outputs/pid_sar3/cca_all_pairs_ur_sigma_0p9.png)
-
-These figures complement `D(i,j)` by visualizing held-out CCA1 scores for `U1`, `R12`, and `R123` across all view pairs. They are useful for geometric confirmation of redundancy structure: at low noise, `R12` is strongly elevated on pair `(1,2)` and `R123` is elevated across all pairs; at high noise, values shrink but the ordering remains visible.
-
-Table 1 summarizes held-out CCA1 correlations from the current figures. Exact values vary with seed; the qualitative ordering is the main signal.
-
-| Atom | Sigma | CCA(1,2) | CCA(1,3) | CCA(2,3) | Interpretation |
-| --- | ---: | ---: | ---: | ---: | --- |
-| `U1` | 0.15 | 0.082 | 0.014 | 0.199 | Mostly low cross-view shared structure; residual nonzero values can occur due to finite-sample effects and random projections. |
-| `R12` | 0.15 | 0.523 | 0.114 | 0.033 | Strongly elevated on the matching pair `(1,2)`, low on mismatched pairs. |
-| `R123` | 0.15 | 0.368 | 0.436 | 0.322 | Elevated across all three pairs, consistent with triple redundancy. |
-| `U1` | 0.90 | 0.051 | 0.047 | 0.052 | Near-noise-floor across pairs under high noise. |
-| `R12` | 0.90 | 0.126 | 0.140 | 0.025 | Weaker than low-noise but still structured; pair `(1,2)` remains informative. |
-| `R123` | 0.90 | 0.115 | 0.160 | 0.240 | Shared structure persists across pairs but is attenuated by noise. |
-
-### 3.4 Targeted-Boost Stress Tests (Metric-Atom Alignment Matters)
+### 3.3 Targeted-Boost Stress Tests (Metric-Atom Alignment Matters)
 
 These summaries are stress tests, not correctness checks. They test whether diagnostics move in the expected direction when one atom is selectively amplified via `pid_gain_overrides`, with nuisance settings fixed (`sigma = 0.45`, `rho = 0.5`, `hop = 2`).
 
@@ -174,7 +155,7 @@ This CCA boost summary is secondary. It is useful for redundancy boosts (`R12`, 
 | boost `R123` | 0.022 | 0.294 | 0.455 | 0.028 |
 | boost `S12->3` | 0.022 | 0.294 | 0.380 | 0.008 |
 
-### 3.5 Secondary / Optional Diagnostics
+### 3.4 Secondary / Optional Diagnostics
 
 The following tests are useful during development but are not required for the main validation argument in this note: `test_plot_pid_metadata_distributions()` (sampling sanity checks) and `test_plot_atom_gain_controls_ur()` (gain-effect intuition).
 ## 4. Code Tutorial (How the Dataset Is Implemented and Used)
@@ -256,7 +237,7 @@ np.savez_compressed("data/pid_sar3_ur_train.npz", **batch)
 
 ### 4.5 Where the Diagnostics Are Implemented
 
-The core diagnostics used in Section 3 are implemented in `tests/test_pid_sar3_dataset.py`: `test_plot_single_atom_correctness_validation()`, `test_plot_ur_compact_signature_grid_over_sigma()`, `test_plot_pid_dependence_distributions_boxplots()`, `test_plot_ur_hyperparameter_sweeps_compact()`, `test_plot_cca_all_pairs_ur()`, `test_plot_downstream_task_boosting_summary()`, `test_plot_synergy_task_gap_boosting_summary()`, and `test_plot_cca_boosting_mechanisms_summary()`. Two tests are useful but secondary for the main argument: `test_plot_pid_metadata_distributions()` and `test_plot_atom_gain_controls_ur()`.
+The core diagnostics used in Section 3 are implemented in `tests/test_pid_sar3_dataset.py`: `test_plot_single_atom_correctness_validation()`, `test_plot_ur_compact_signature_grid_over_sigma()`, `test_plot_pid_dependence_distributions_boxplots()`, `test_plot_ur_hyperparameter_sweeps_compact()`, `test_plot_downstream_task_boosting_summary()`, `test_plot_synergy_task_gap_boosting_summary()`, and `test_plot_cca_boosting_mechanisms_summary()`. Two tests are useful but secondary for the main argument: `test_plot_pid_metadata_distributions()` and `test_plot_atom_gain_controls_ur()`.
 
 ## 5. Commands to Reproduce the Dataset and Figures
 
@@ -269,7 +250,6 @@ from tests.test_pid_sar3_dataset import (
     test_plot_ur_compact_signature_grid_over_sigma,
     test_plot_pid_dependence_distributions_boxplots,
     test_plot_ur_hyperparameter_sweeps_compact,
-    test_plot_cca_all_pairs_ur,
     test_plot_downstream_task_boosting_summary,
     test_plot_synergy_task_gap_boosting_summary,
     test_plot_cca_boosting_mechanisms_summary,
@@ -279,7 +259,6 @@ test_plot_single_atom_correctness_validation()
 test_plot_ur_compact_signature_grid_over_sigma()
 test_plot_pid_dependence_distributions_boxplots()
 test_plot_ur_hyperparameter_sweeps_compact()
-test_plot_cca_all_pairs_ur()
 test_plot_downstream_task_boosting_summary()
 test_plot_synergy_task_gap_boosting_summary()
 test_plot_cca_boosting_mechanisms_summary()
@@ -287,7 +266,7 @@ print("Saved plots under test_outputs/pid_sar3")
 PY
 ```
 
-This command generates the main figures and CSV summaries referenced in Section 3 (single-atom correctness, `D(i,j)` U/R structure checks, CCA redundancy geometry, and targeted-boost stress tests).
+This command generates the main figures and CSV summaries referenced in Section 3 (single-atom correctness, `D(i,j)` U/R structure checks, and targeted-boost stress tests).
 
 Optional secondary diagnostics (sampling sanity and gain-intuition):
 

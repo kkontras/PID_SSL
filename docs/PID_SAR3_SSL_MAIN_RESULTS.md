@@ -207,6 +207,13 @@ Artifacts:
 
 The loss curves show the expected optimization behavior: training loss decreases, validation loss decreases early and then flattens, and the selected checkpoints occur at finite epochs rather than degenerate first/last-epoch behavior. This supports the interpretation that the downstream similarities are not caused by a simple failure to optimize the SSL objectives.
 
+Follow-up overfitting ablation (separate note): `docs/PID_SAR3_SSL_OVERFITTING_COMPARISON.md`.
+
+Best case found in that sweep (for fixed `10k/2k` training):
+
+- `max_epochs = 10` (`early_cap_10`) gave the lowest mean overfit drift across the joint models
+- stronger weight decay (`1e-3`) helped, but less than early capping in this sweep
+
 #### 6.4.5 Training-Mixture Sensitivity at `L0` (Balanced vs Skewed PID Mixes, Fixed 10k Train Budget)
 
 To test whether the `L0` results are stable to the SSL training distribution under a fixed finite-data budget, we reran the same `L0` bundle with:

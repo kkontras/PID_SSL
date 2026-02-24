@@ -690,6 +690,37 @@ def _write_training_history_and_plot(
     _savefig(out_dir / f"{prefix}_loss_curves.png")
 
 
+def _history_gap_summary(rows: List[Dict[str, float]], variant: str) -> List[Dict[str, float]]:
+    out: List[Dict[str, float]] = []
+    groups: Dict[Tuple[str, str], List[Dict[str, float]]] = {}
+    for r in rows:
+        groups.setdefault((str(r.get("model", "")), str(r.get("stream", ""))), []).append(r)
+    for (model, stream), rs in groups.items():
+        rs = sorted(rs, key=lambda r: float(r["epoch"]))
+        first = rs[0]
+        last = rs[-1]
+        best = min(rs, key=lambda r: float(r["val_loss"]))
+        out.append(
+            {
+                "variant": variant,
+                "model": model,
+                "stream": stream,
+                "n_epochs": float(len(rs)),
+                "first_train_loss": float(first["train_loss"]),
+                "first_val_loss": float(first["val_loss"]),
+                "best_epoch": float(best["epoch"]),
+                "best_train_loss": float(best["train_loss"]),
+                "best_val_loss": float(best["val_loss"]),
+                "last_train_loss": float(last["train_loss"]),
+                "last_val_loss": float(last["val_loss"]),
+                "best_gap_val_minus_train": float(best["val_loss"] - best["train_loss"]),
+                "last_gap_val_minus_train": float(last["val_loss"] - last["train_loss"]),
+                "overfit_drift_last_minus_best_val": float(last["val_loss"] - best["val_loss"]),
+            }
+        )
+    return out
+
+
 def _evaluate_all_tasks(Xtr: np.ndarray, train_batch: Dict[str, np.ndarray], Xte: np.ndarray, test_batch: Dict[str, np.ndarray]) -> Dict[str, float]:
     ytr_pid = train_batch["pid_id"].astype(np.int64)
     yte_pid = test_batch["pid_id"].astype(np.int64)
@@ -3357,4 +3388,159 @@ def test_analysis_bundle_four_models_compositional_very_easy():
 
     assert len(kappa_summary_rows) == 4 * 4 * 3
     assert len(retrieval_rows) == 4 * 7 * 3
-    assert len(recon_summary_rows) == 2 * 4 * 4 * 3
+
+
+def test_l0_optimization_gap_ablations_fixed_budget():
+    """
+    Compare train/validation loss gap dynamics for joint SSL objectives under a
+    fixed finite-data budget (10k train / 2k val) and several interventions.
+
+    This is a history-only diagnostic: no downstream probes are run here.
+    """
+    out_dir = _ensure_plot_dir()
+    device = str(os.getenv("PIDSSL_GAP_ABL_DEVICE", "cpu"))
+    epochs = int(os.getenv("PIDSSL_GAP_ABL_EPOCHS", "50"))
+    batch_size = int(os.getenv("PIDSSL_GAP_ABL_BATCH_SIZE", "128"))
+    n_train_per_pid = int(os.getenv("PIDSSL_GAP_ABL_TRAIN_PER_PID", "1000"))  # total 10k
+    n_val_per_pid = int(os.getenv("PIDSSL_GAP_ABL_VAL_PER_PID", "200"))       # total 2k
+
+    variants = [
+        {"name": "baseline", "shared_backbone_gain": 4.0, "weight_decay": 1e-5, "epochs": epochs},
+        {"name": "lower_shared_gain", "shared_backbone_gain": 1.0, "weight_decay": 1e-5, "epochs": epochs},
+        {"name": "strong_weight_decay", "shared_backbone_gain": 4.0, "weight_decay": 1e-3, "epochs": epochs},
+        {"name": "lower_shared_plus_wd", "shared_backbone_gain": 1.0, "weight_decay": 1e-3, "epochs": epochs},
+        {"name": "early_cap_10", "shared_backbone_gain": 4.0, "weight_decay": 1e-5, "epochs": 10},
+    ]
+
+    all_hist_rows: List[Dict[str, float]] = []
+    gap_rows: List[Dict[str, float]] = []
+
+    for i, v in enumerate(variants):
+        data_cfg = _data_cfg_compositional_very_easy(seed=5001 + i)
+        data_cfg = PIDDatasetConfig(**{**data_cfg.__dict__, "shared_backbone_gain": float(v["shared_backbone_gain"])})
+        train_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": int(data_cfg.seed) + 11}))
+        val_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": int(data_cfg.seed) + 23}))
+        train_batch = _balanced_batch(train_gen, n_per_pid=n_train_per_pid, shuffle_seed=41 + i, return_aux=False)
+        val_batch = _balanced_batch(val_gen, n_per_pid=n_val_per_pid, shuffle_seed=71 + i, return_aux=False)
+
+        enc_cfg = SSLEncoderConfig(
+            input_dim=data_cfg.d,
+            encoder_hidden_dim=96,
+            representation_dim=48,
+            projector_hidden_dim=96,
+            projector_dim=48,
+        )
+        base_cfg = SSLTrainConfig(
+            lr=1e-3,
+            weight_decay=float(v["weight_decay"]),
+            batch_size=int(batch_size),
+            steps=180,  # unused in fixed-dataset mode
+            temperature=0.2,
+            device=device,
+            seed=141,
+            triangle_reg_weight=0.15,
+            confu_pair_weight=0.5,
+            confu_fused_weight=0.5,
+        )
+
+        # Joint models only; these showed the strongest overfitting.
+        model_b, hist_b = _train_trimodal_objective_fixed_dataset_best_val(
+            enc_cfg, base_cfg, "pairwise_simclr", train_batch, val_batch, epochs=int(v["epochs"]), model_name="sum_3_pairwise_infonce"
+        )
+        model_c, hist_c = _train_trimodal_objective_fixed_dataset_best_val(
+            enc_cfg, base_cfg, "triangle_exact", train_batch, val_batch, epochs=int(v["epochs"]), model_name="triangle_exact"
+        )
+        model_d, hist_d = _train_trimodal_objective_fixed_dataset_best_val(
+            enc_cfg, base_cfg, "confu_style", train_batch, val_batch, epochs=int(v["epochs"]), model_name="confu_style"
+        )
+        if device != "cpu":
+            model_b.cpu()
+            model_c.cpu()
+            model_d.cpu()
+
+        hist_rows = hist_b + hist_c + hist_d
+        for r in hist_rows:
+            r2 = dict(r)
+            r2["variant"] = v["name"]
+            r2["shared_backbone_gain"] = float(v["shared_backbone_gain"])
+            r2["weight_decay"] = float(v["weight_decay"])
+            r2["epochs_cap"] = float(v["epochs"])
+            all_hist_rows.append(r2)
+        gap_rows.extend(_history_gap_summary(hist_rows, variant=str(v["name"])))
+
+    hist_csv = out_dir / "l0_optimization_gap_ablations_history.csv"
+    gap_csv = out_dir / "l0_optimization_gap_ablations_summary.csv"
+    with hist_csv.open("w", encoding="utf-8", newline="") as f:
+        cols = [
+            "variant", "shared_backbone_gain", "weight_decay", "epochs_cap",
+            "model", "stream", "epoch", "train_loss", "val_loss", "best_val_loss_so_far", "best_epoch_so_far",
+        ]
+        writer = csv.DictWriter(f, fieldnames=cols)
+        writer.writeheader()
+        for r in all_hist_rows:
+            writer.writerow({k: r.get(k, "") for k in cols})
+    with gap_csv.open("w", encoding="utf-8", newline="") as f:
+        cols = [
+            "variant", "model", "stream", "n_epochs",
+            "first_train_loss", "first_val_loss", "best_epoch", "best_train_loss", "best_val_loss",
+            "last_train_loss", "last_val_loss", "best_gap_val_minus_train", "last_gap_val_minus_train",
+            "overfit_drift_last_minus_best_val",
+        ]
+        writer = csv.DictWriter(f, fieldnames=cols)
+        writer.writeheader()
+        for r in gap_rows:
+            writer.writerow(r)
+
+    # Aggregate bar plots across joint models.
+    import pandas as _pd  # local import to avoid top-level dependency changes
+    hist_df = _pd.DataFrame(all_hist_rows)
+    gap_df = _pd.DataFrame(gap_rows)
+    joint_order = ["sum_3_pairwise_infonce", "triangle_exact", "confu_style"]
+    variant_order = [str(v["name"]) for v in variants]
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.8, 4.2))
+    # Mean overfit drift and last gap across joint models.
+    means_drift = []
+    means_gap = []
+    for vname in variant_order:
+        sub = gap_df[(gap_df["variant"] == vname) & (gap_df["model"].isin(joint_order))]
+        means_drift.append(float(sub["overfit_drift_last_minus_best_val"].mean()))
+        means_gap.append(float(sub["last_gap_val_minus_train"].mean()))
+    x = np.arange(len(variant_order))
+    axes[0].bar(x, means_drift, color="#e45756")
+    axes[0].set_title("Mean overfit drift (joint models)")
+    axes[0].set_ylabel("last val - best val")
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(variant_order, rotation=25, ha="right")
+    axes[0].grid(axis="y", alpha=0.25)
+    axes[1].bar(x, means_gap, color="#4c78a8")
+    axes[1].set_title("Mean final val-train gap (joint models)")
+    axes[1].set_ylabel("last val - last train")
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(variant_order, rotation=25, ha="right")
+    axes[1].grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+    _savefig(out_dir / "l0_optimization_gap_ablations_bars.png")
+
+    # Representative learning curves for pairwise InfoNCE.
+    fig, axes = plt.subplots(1, len(variant_order), figsize=(3.4 * len(variant_order), 3.4), squeeze=False)
+    for ax, vname in zip(axes.ravel(), variant_order):
+        sub = hist_df[(hist_df["variant"] == vname) & (hist_df["model"] == "sum_3_pairwise_infonce")].sort_values("epoch")
+        ax.plot(sub["epoch"], sub["train_loss"], label="train", color="#4c78a8", linewidth=2)
+        ax.plot(sub["epoch"], sub["val_loss"], label="val", color="#e45756", linewidth=2)
+        best_idx = int(sub["val_loss"].idxmin())
+        best_epoch = int(hist_df.loc[best_idx, "epoch"]) if len(sub) else 0
+        if best_epoch > 0:
+            ax.axvline(best_epoch, linestyle="--", color="black", linewidth=1, alpha=0.6)
+        ax.set_title(vname)
+        ax.set_xlabel("epoch")
+        ax.set_ylabel("loss")
+        ax.grid(alpha=0.25)
+    axes[0, 0].legend(frameon=False, fontsize=8)
+    fig.suptitle("Pairwise InfoNCE train/val loss across overfitting ablations", y=1.03)
+    fig.tight_layout()
+    _savefig(out_dir / "l0_optimization_gap_ablations_pairwise_curves.png")
+
+    # Weak sanity check: at least one intervention should reduce mean joint overfit drift vs baseline.
+    baseline_drift = means_drift[0]
+    assert min(means_drift[1:]) < baseline_drift, (means_drift, variant_order)

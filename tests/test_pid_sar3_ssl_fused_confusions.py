@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import copy
 import os
 import sys
 import warnings
@@ -13,6 +14,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import accuracy_score, cohen_kappa_score, confusion_matrix, f1_score, r2_score
 from sklearn.model_selection import StratifiedKFold
@@ -35,8 +37,11 @@ from pid_sar3_ssl import (
     encode_numpy,
     encode_unimodal_numpy,
     family_from_pid_ids,
+    numpy_batch_to_torch,
+    ssl_objective_loss,
     train_ssl,
     train_unimodal_simclr,
+    _nt_xent_pair,
 )
 
 
@@ -59,6 +64,18 @@ def _savefig(path: Path) -> None:
 def _balanced_batch(gen: PIDSar3DatasetGenerator, n_per_pid: int, shuffle_seed: int, return_aux: bool = False) -> Dict[str, np.ndarray]:
     pid_ids = np.repeat(np.arange(10, dtype=np.int64), n_per_pid)
     rng = np.random.default_rng(shuffle_seed)
+    rng.shuffle(pid_ids)
+    return gen.generate(n=int(pid_ids.size), pid_ids=pid_ids.tolist(), return_aux=return_aux)
+
+
+def _batch_from_pid_counts(
+    gen: PIDSar3DatasetGenerator, pid_counts: Dict[int, int], shuffle_seed: int, return_aux: bool = False
+) -> Dict[str, np.ndarray]:
+    pid_ids_list: List[int] = []
+    for pid_id in range(10):
+        pid_ids_list.extend([int(pid_id)] * int(pid_counts.get(pid_id, 0)))
+    pid_ids = np.asarray(pid_ids_list, dtype=np.int64)
+    rng = np.random.default_rng(int(shuffle_seed))
     rng.shuffle(pid_ids)
     return gen.generate(n=int(pid_ids.size), pid_ids=pid_ids.tolist(), return_aux=return_aux)
 
@@ -421,6 +438,200 @@ def _train_trimodal_objective(
     hist = train_ssl(model, gen, cfg, pid_schedule=pid_schedule)
     rows = [{"model": model_name, "stream": "joint", **r} for r in hist]
     return model, rows
+
+
+def _iter_minibatch_indices(n: int, batch_size: int, rng: np.random.Generator) -> List[np.ndarray]:
+    idx = np.arange(n, dtype=np.int64)
+    rng.shuffle(idx)
+    return [idx[s : s + batch_size] for s in range(0, n, batch_size)]
+
+
+def _slice_numpy_batch(batch: Dict[str, np.ndarray], idx: np.ndarray) -> Dict[str, np.ndarray]:
+    out: Dict[str, np.ndarray] = {}
+    for k, v in batch.items():
+        if isinstance(v, np.ndarray) and v.shape[0] == batch["x1"].shape[0]:
+            out[k] = v[idx]
+        else:
+            out[k] = v
+    return out
+
+
+def _compute_trimodal_ssl_loss(
+    model: TriModalSSLModel,
+    batch_np: Dict[str, np.ndarray],
+    cfg: SSLTrainConfig,
+    device: str,
+) -> torch.Tensor:
+    batch_t = numpy_batch_to_torch(batch_np, device=device)
+    _, z = model(batch_t)
+    fused = None
+    directional_preds = None
+    if cfg.objective == "confu_style" and hasattr(model, "fuse_projected"):
+        fused = model.fuse_projected(z)  # type: ignore[attr-defined]
+    if cfg.objective == "directional_predictive_hybrid" and hasattr(model, "predict_directional_h"):
+        h_for_pred = model.encode(batch_t)  # type: ignore[assignment]
+        directional_preds = model.predict_directional_h(h_for_pred)  # type: ignore[attr-defined]
+    else:
+        h_for_pred = None
+    loss, _ = ssl_objective_loss(
+        z,
+        objective=cfg.objective,
+        temperature=cfg.temperature,
+        triangle_reg_weight=cfg.triangle_reg_weight,
+        confu_pair_weight=cfg.confu_pair_weight,
+        confu_fused_weight=cfg.confu_fused_weight,
+        fused=fused,
+        h=h_for_pred,
+        directional_preds=directional_preds,
+        directional_pred_weight=cfg.directional_pred_weight,
+    )
+    return loss
+
+
+def _train_trimodal_objective_fixed_dataset_best_val(
+    enc_cfg: SSLEncoderConfig,
+    train_cfg: SSLTrainConfig,
+    objective: str,
+    train_batch: Dict[str, np.ndarray],
+    val_batch: Dict[str, np.ndarray],
+    epochs: int,
+    model_name: str,
+) -> Tuple[TriModalSSLModel, List[Dict[str, float]]]:
+    torch.manual_seed(train_cfg.seed)
+    np.random.seed(train_cfg.seed)
+    device = torch.device(train_cfg.device)
+    model = TriModalSSLModel(enc_cfg).to(device)
+    cfg = SSLTrainConfig(**{**train_cfg.__dict__, "objective": objective})
+    opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    rng = np.random.default_rng(int(train_cfg.seed) + 101)
+    history: List[Dict[str, float]] = []
+    best_state = copy.deepcopy(model.state_dict())
+    best_val = float("inf")
+    best_epoch = 0
+    n_train = int(train_batch["x1"].shape[0])
+    for epoch in range(1, int(epochs) + 1):
+        model.train()
+        train_losses: List[float] = []
+        for idx in _iter_minibatch_indices(n_train, int(cfg.batch_size), rng):
+            b = _slice_numpy_batch(train_batch, idx)
+            loss = _compute_trimodal_ssl_loss(model, b, cfg, device=str(device))
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            opt.step()
+            train_losses.append(float(loss.detach().cpu()))
+        model.eval()
+        with torch.no_grad():
+            val_losses: List[float] = []
+            for idx in _iter_minibatch_indices(int(val_batch["x1"].shape[0]), int(cfg.batch_size), rng):
+                b = _slice_numpy_batch(val_batch, idx)
+                loss = _compute_trimodal_ssl_loss(model, b, cfg, device=str(device))
+                val_losses.append(float(loss.detach().cpu()))
+        train_mean = float(np.mean(train_losses)) if train_losses else float("nan")
+        val_mean = float(np.mean(val_losses)) if val_losses else float("nan")
+        if val_mean < best_val:
+            best_val = val_mean
+            best_epoch = epoch
+            best_state = copy.deepcopy(model.state_dict())
+        history.append(
+            {
+                "epoch": float(epoch),
+                "train_loss": train_mean,
+                "val_loss": val_mean,
+                "best_val_loss_so_far": float(best_val),
+                "best_epoch_so_far": float(best_epoch),
+                "model": model_name,
+                "stream": "joint",
+            }
+        )
+    model.load_state_dict(best_state)
+    return model, history
+
+
+def _train_unimodal_fixed_dataset_best_val(
+    enc_cfg: SSLEncoderConfig,
+    train_cfg: SSLTrainConfig,
+    modality_key: str,
+    train_batch: Dict[str, np.ndarray],
+    val_batch: Dict[str, np.ndarray],
+    epochs: int,
+) -> Tuple[UnimodalSimCLRModel, List[Dict[str, float]]]:
+    torch.manual_seed(train_cfg.seed)
+    np.random.seed(train_cfg.seed)
+    device = torch.device(train_cfg.device)
+    model = UnimodalSimCLRModel(enc_cfg).to(device)
+    aug = VectorAugmenter(VectorAugmentationConfig(jitter_std=0.08, feature_drop_prob=0.08, gain_min=0.92, gain_max=1.08)).to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.weight_decay)
+    rng = np.random.default_rng(int(train_cfg.seed) + 211)
+    history: List[Dict[str, float]] = []
+    best_state = copy.deepcopy(model.state_dict())
+    best_val = float("inf")
+    best_epoch = 0
+    n_train = int(train_batch[modality_key].shape[0])
+    for epoch in range(1, int(epochs) + 1):
+        model.train()
+        aug.train()
+        train_losses: List[float] = []
+        for idx in _iter_minibatch_indices(n_train, int(train_cfg.batch_size), rng):
+            x_np = train_batch[modality_key][idx]
+            x = torch.from_numpy(x_np).float().to(device)
+            x1 = aug(x)
+            x2 = aug(x)
+            _, z1 = model(x1)
+            _, z2 = model(x2)
+            loss = _nt_xent_pair(z1, z2, temperature=train_cfg.temperature)
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            opt.step()
+            train_losses.append(float(loss.detach().cpu()))
+        model.eval()
+        aug.train()  # keep stochastic augmentations for validation objective comparability
+        with torch.no_grad():
+            val_losses: List[float] = []
+            for idx in _iter_minibatch_indices(int(val_batch[modality_key].shape[0]), int(train_cfg.batch_size), rng):
+                x_np = val_batch[modality_key][idx]
+                x = torch.from_numpy(x_np).float().to(device)
+                x1 = aug(x)
+                x2 = aug(x)
+                _, z1 = model(x1)
+                _, z2 = model(x2)
+                loss = _nt_xent_pair(z1, z2, temperature=train_cfg.temperature)
+                val_losses.append(float(loss.detach().cpu()))
+        train_mean = float(np.mean(train_losses)) if train_losses else float("nan")
+        val_mean = float(np.mean(val_losses)) if val_losses else float("nan")
+        if val_mean < best_val:
+            best_val = val_mean
+            best_epoch = epoch
+            best_state = copy.deepcopy(model.state_dict())
+        history.append(
+            {
+                "epoch": float(epoch),
+                "train_loss": train_mean,
+                "val_loss": val_mean,
+                "best_val_loss_so_far": float(best_val),
+                "best_epoch_so_far": float(best_epoch),
+                "model": "sum_3_unimodal_simclr",
+                "stream": modality_key,
+            }
+        )
+    model.load_state_dict(best_state)
+    return model, history
+
+
+def _train_model_a_unimodal_fixed_dataset_best_val(
+    enc_cfg: SSLEncoderConfig,
+    train_cfg: SSLTrainConfig,
+    train_batch: Dict[str, np.ndarray],
+    val_batch: Dict[str, np.ndarray],
+    epochs: int,
+) -> Tuple[Dict[str, UnimodalSimCLRModel], List[Dict[str, float]]]:
+    models: Dict[str, UnimodalSimCLRModel] = {}
+    rows: List[Dict[str, float]] = []
+    for i, modality in enumerate(("x1", "x2", "x3")):
+        cfg_i = SSLTrainConfig(**{**train_cfg.__dict__, "seed": int(train_cfg.seed) + i})
+        model, hist = _train_unimodal_fixed_dataset_best_val(enc_cfg, cfg_i, modality, train_batch, val_batch, epochs)
+        models[modality] = model
+        rows.extend(hist)
+    return models, rows
 
 
 def _evaluate_all_tasks(Xtr: np.ndarray, train_batch: Dict[str, np.ndarray], Xte: np.ndarray, test_batch: Dict[str, np.ndarray]) -> Dict[str, float]:
@@ -2658,9 +2869,14 @@ def test_analysis_bundle_four_models_compositional_very_easy():
     out_dir = _ensure_plot_dir()
     data_cfg = _data_cfg_compositional_very_easy(seed=4001)
     ssl_steps = int(os.getenv("PIDSSL_L0_SSL_STEPS", "180"))
+    ssl_batch_size = int(os.getenv("PIDSSL_L0_BATCH_SIZE", "192"))
     probe_n_per_pid = int(os.getenv("PIDSSL_L0_PROBE_N_PER_PID", "40"))
     n_splits = int(os.getenv("PIDSSL_L0_N_FOLDS", "2"))
     train_device = str(os.getenv("PIDSSL_L0_DEVICE", "cpu"))
+    train_mode = str(os.getenv("PIDSSL_L0_TRAIN_MODE", "steps")).strip().lower()
+    epochs = int(os.getenv("PIDSSL_L0_EPOCHS", "50"))
+    n_train_total = int(os.getenv("PIDSSL_L0_TRAIN_N", "10000"))
+    n_val_total = int(os.getenv("PIDSSL_L0_VAL_N", "2000"))
     train_pid_schedule_name = str(os.getenv("PIDSSL_L0_TRAIN_PID_SCHEDULE", "balanced")).strip()
     output_suffix = str(os.getenv("PIDSSL_L0_OUTPUT_SUFFIX", "")).strip()
     pid_schedule, pid_counts = _named_pid_schedule(train_pid_schedule_name)
@@ -2670,7 +2886,7 @@ def test_analysis_bundle_four_models_compositional_very_easy():
     train_cfg = SSLTrainConfig(
         lr=1e-3,
         weight_decay=1e-5,
-        batch_size=192,
+        batch_size=ssl_batch_size,
         steps=ssl_steps,
         temperature=0.2,
         device=train_device,
@@ -2680,16 +2896,42 @@ def test_analysis_bundle_four_models_compositional_very_easy():
         confu_fused_weight=0.5,
     )
 
-    unimodal_models, _ = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, train_cfg, pid_schedule=pid_schedule)
-    model_b, _ = _train_trimodal_objective(
-        ssl_gen, enc_cfg, train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce", pid_schedule=pid_schedule
-    )
-    model_c, _ = _train_trimodal_objective(
-        ssl_gen, enc_cfg, train_cfg, "triangle_exact", "triangle_exact", pid_schedule=pid_schedule
-    )
-    model_d, _ = _train_trimodal_objective(
-        ssl_gen, enc_cfg, train_cfg, "confu_style", "confu_style", pid_schedule=pid_schedule
-    )
+    if train_mode == "epoch_val_select":
+        # Fixed finite datasets for training/validation; selection by validation loss.
+        train_scale = n_train_total / float(sum(int(v) for v in pid_counts.values()))
+        val_scale = n_val_total / float(sum(int(v) for v in pid_counts.values()))
+        train_counts = {pid: int(round(pid_counts[pid] * train_scale)) for pid in range(10)}
+        val_counts = {pid: int(round(pid_counts[pid] * val_scale)) for pid in range(10)}
+        # Fix rounding drift while preserving non-negativity.
+        train_counts[0] += int(n_train_total - sum(train_counts.values()))
+        val_counts[0] += int(n_val_total - sum(val_counts.values()))
+        train_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": int(data_cfg.seed) + 11}))
+        val_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": int(data_cfg.seed) + 23}))
+        ssl_train_batch = _batch_from_pid_counts(train_gen, train_counts, shuffle_seed=41, return_aux=False)
+        ssl_val_batch = _batch_from_pid_counts(val_gen, val_counts, shuffle_seed=43, return_aux=False)
+        unimodal_models, _ = _train_model_a_unimodal_fixed_dataset_best_val(
+            enc_cfg, train_cfg, ssl_train_batch, ssl_val_batch, epochs=int(epochs)
+        )
+        model_b, _ = _train_trimodal_objective_fixed_dataset_best_val(
+            enc_cfg, train_cfg, "pairwise_simclr", ssl_train_batch, ssl_val_batch, epochs=int(epochs), model_name="sum_3_pairwise_infonce"
+        )
+        model_c, _ = _train_trimodal_objective_fixed_dataset_best_val(
+            enc_cfg, train_cfg, "triangle_exact", ssl_train_batch, ssl_val_batch, epochs=int(epochs), model_name="triangle_exact"
+        )
+        model_d, _ = _train_trimodal_objective_fixed_dataset_best_val(
+            enc_cfg, train_cfg, "confu_style", ssl_train_batch, ssl_val_batch, epochs=int(epochs), model_name="confu_style"
+        )
+    else:
+        unimodal_models, _ = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, train_cfg, pid_schedule=pid_schedule)
+        model_b, _ = _train_trimodal_objective(
+            ssl_gen, enc_cfg, train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce", pid_schedule=pid_schedule
+        )
+        model_c, _ = _train_trimodal_objective(
+            ssl_gen, enc_cfg, train_cfg, "triangle_exact", "triangle_exact", pid_schedule=pid_schedule
+        )
+        model_d, _ = _train_trimodal_objective(
+            ssl_gen, enc_cfg, train_cfg, "confu_style", "confu_style", pid_schedule=pid_schedule
+        )
     if train_device != "cpu":
         for m in unimodal_models.values():
             m.cpu()
@@ -3003,14 +3245,31 @@ def test_analysis_bundle_four_models_compositional_very_easy():
     with (out_dir / f"compositional_very_easy_analysis_bundle_metadata{suffix}.csv").open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=["output_suffix", "train_pid_schedule_name", "ssl_steps", "probe_n_per_pid", "n_folds", "train_device"],
+            fieldnames=[
+                "output_suffix",
+                "train_pid_schedule_name",
+                "train_mode",
+                "ssl_steps",
+                "batch_size",
+                "epochs",
+                "n_train_total",
+                "n_val_total",
+                "probe_n_per_pid",
+                "n_folds",
+                "train_device",
+            ],
         )
         writer.writeheader()
         writer.writerow(
             {
                 "output_suffix": output_suffix,
                 "train_pid_schedule_name": train_pid_schedule_name,
+                "train_mode": train_mode,
                 "ssl_steps": float(ssl_steps),
+                "batch_size": float(ssl_batch_size),
+                "epochs": float(epochs),
+                "n_train_total": float(n_train_total),
+                "n_val_total": float(n_val_total),
                 "probe_n_per_pid": float(probe_n_per_pid),
                 "n_folds": float(n_splits),
                 "train_device": train_device,

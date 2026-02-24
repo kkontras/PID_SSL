@@ -1,25 +1,25 @@
 decoder,decoder_label,model,model_label,group,macro_r2_mean,macro_nrmse_mean
-mlp,MLP,A,A: 3x unimodal SimCLR,pair_to_member_target,0.8265434863221949,0.4077578163050288
-mlp,MLP,A,A: 3x unimodal SimCLR,pair_to_heldout_target,0.742241145109752,0.4952744061921
-mlp,MLP,A,A: 3x unimodal SimCLR,triple_to_target,0.824266134001251,0.4106615546258235
-mlp,MLP,B,B: pairwise InfoNCE,pair_to_member_target,0.7570685164281835,0.4795014382424027
-mlp,MLP,B,B: pairwise InfoNCE,pair_to_heldout_target,0.7253180951163928,0.5120516061032693
-mlp,MLP,B,B: pairwise InfoNCE,triple_to_target,0.7582686379258825,0.47832921362289954
-mlp,MLP,C,C: TRIANGLE,pair_to_member_target,0.755948828882434,0.4804626054201048
-mlp,MLP,C,C: TRIANGLE,pair_to_heldout_target,0.7167902719720036,0.5197501332620504
-mlp,MLP,C,C: TRIANGLE,triple_to_target,0.7596500875277731,0.4767010224642156
-mlp,MLP,D,D: ConFu,pair_to_member_target,0.7278450584868857,0.5085285314222865
-mlp,MLP,D,D: ConFu,pair_to_heldout_target,0.6980267756312193,0.537228892048158
-mlp,MLP,D,D: ConFu,triple_to_target,0.7302679968473217,0.5060664470210541
-ridge,Ridge,A,A: 3x unimodal SimCLR,pair_to_member_target,0.8755609830083819,0.34387972713319304
-ridge,Ridge,A,A: 3x unimodal SimCLR,pair_to_heldout_target,0.7662102929480636,0.46897830721074696
-ridge,Ridge,A,A: 3x unimodal SimCLR,triple_to_target,0.8796105369300221,0.3381777355581758
-ridge,Ridge,B,B: pairwise InfoNCE,pair_to_member_target,0.8207761021832624,0.4083621715075835
-ridge,Ridge,B,B: pairwise InfoNCE,pair_to_heldout_target,0.759310839778907,0.4763692096327821
-ridge,Ridge,B,B: pairwise InfoNCE,triple_to_target,0.8253069971518632,0.40246803952686655
-ridge,Ridge,C,C: TRIANGLE,pair_to_member_target,0.8328598504531705,0.39402306711506313
-ridge,Ridge,C,C: TRIANGLE,pair_to_heldout_target,0.7543966853695879,0.48128774993375717
-ridge,Ridge,C,C: TRIANGLE,triple_to_target,0.8407056330785646,0.3841702664685831
-ridge,Ridge,D,D: ConFu,pair_to_member_target,0.8069328492008587,0.4248643220222519
-ridge,Ridge,D,D: ConFu,pair_to_heldout_target,0.7442853849667053,0.4916290429671341
-ridge,Ridge,D,D: ConFu,triple_to_target,0.8139804294056155,0.4164910597572926
+mlp,MLP,A,A: 3x unimodal SimCLR,pair_to_member_target,0.7272086695673475,0.5119193899052165
+mlp,MLP,A,A: 3x unimodal SimCLR,pair_to_heldout_target,0.6545741647179387,0.5782926528512934
+mlp,MLP,A,A: 3x unimodal SimCLR,triple_to_target,0.7502693597305085,0.489871310719354
+mlp,MLP,B,B: pairwise InfoNCE,pair_to_member_target,0.7794180987966769,0.46097147012173245
+mlp,MLP,B,B: pairwise InfoNCE,pair_to_heldout_target,0.6987543340643168,0.5384892870809406
+mlp,MLP,B,B: pairwise InfoNCE,triple_to_target,0.7845063188061366,0.45521599491590753
+mlp,MLP,C,C: TRIANGLE,pair_to_member_target,0.7796108497227285,0.46025138519007736
+mlp,MLP,C,C: TRIANGLE,pair_to_heldout_target,0.7020492618174491,0.5349448559672636
+mlp,MLP,C,C: TRIANGLE,triple_to_target,0.7848389760116795,0.4546976862682038
+mlp,MLP,D,D: ConFu,pair_to_member_target,0.7716932288167676,0.4692177570176972
+mlp,MLP,D,D: ConFu,pair_to_heldout_target,0.6921888966718556,0.5444374058333749
+mlp,MLP,D,D: ConFu,triple_to_target,0.7806996863824037,0.45935822103939294
+ridge,Ridge,A,A: 3x unimodal SimCLR,pair_to_member_target,0.8075046439670232,0.42694810383814435
+ridge,Ridge,A,A: 3x unimodal SimCLR,pair_to_heldout_target,0.7121337026396661,0.5251970570275378
+ridge,Ridge,A,A: 3x unimodal SimCLR,triple_to_target,0.8266407747005893,0.40431446645166985
+ridge,Ridge,B,B: pairwise InfoNCE,pair_to_member_target,0.8504874412988487,0.37730493711394386
+ridge,Ridge,B,B: pairwise InfoNCE,pair_to_heldout_target,0.7378701078633773,0.4992635799480574
+ridge,Ridge,B,B: pairwise InfoNCE,triple_to_target,0.8619346382484986,0.3617360597369599
+ridge,Ridge,C,C: TRIANGLE,pair_to_member_target,0.8504110118915761,0.3769346619935429
+ridge,Ridge,C,C: TRIANGLE,pair_to_heldout_target,0.7372638491056218,0.49963747978569284
+ridge,Ridge,C,C: TRIANGLE,triple_to_target,0.8626158591510795,0.3603278844570881
+ridge,Ridge,D,D: ConFu,pair_to_member_target,0.8456548667681858,0.3838339240803341
+ridge,Ridge,D,D: ConFu,pair_to_heldout_target,0.7341829834325059,0.5030124479248573
+ridge,Ridge,D,D: ConFu,triple_to_target,0.8582104144579276,0.3670770224122097

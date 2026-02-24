@@ -1,0 +1,11 @@
+schedule_tag,pid_id,pid_name,count,probability
+balanced,0.0,U1,1.0,0.1
+balanced,1.0,U2,1.0,0.1
+balanced,2.0,U3,1.0,0.1
+balanced,3.0,R12,1.0,0.1
+balanced,4.0,R13,1.0,0.1
+balanced,5.0,R23,1.0,0.1
+balanced,6.0,R123,1.0,0.1
+balanced,7.0,S12->3,1.0,0.1
+balanced,8.0,S13->2,1.0,0.1
+balanced,9.0,S23->1,1.0,0.1

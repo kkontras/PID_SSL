@@ -194,9 +194,18 @@ Rotated `pair->heldout` slice (macro \(R^2\), 5-fold mean \(\pm\) SE):
 
 In `L0`, reconstruction is uniformly strong and no longer dominated by near-chance behavior. This confirms that the new compositional regime is suitable for objective comparison.
 
-#### 6.4.4 Training-Mixture Sensitivity at `L0` (Balanced vs Skewed PID Mixes)
+#### 6.4.4 Training-Mixture Sensitivity at `L0` (Balanced vs Skewed PID Mixes, Fixed 10k Train Budget)
 
-To test whether the `L0` results are stable to the SSL training distribution, we reran the same heavy `L0` bundle (`480` steps, `n=1000` probe set, `5` folds) with three non-uniform PID training schedules while keeping the probe/evaluation sets balanced across the 10 PID atoms.
+To test whether the `L0` results are stable to the SSL training distribution under a fixed finite-data budget, we reran the same `L0` bundle with:
+
+- SSL training set: `10,000` samples (fixed dataset)
+- validation set: `2,000` samples (fixed dataset)
+- optimizer batch size: `128`
+- training length: `50` epochs
+- checkpoint selection: best validation loss
+- probe/evaluation set: balanced `n=1000` (`100` per PID atom), `5` folds for \(\kappa\) and reconstruction
+
+The imbalance is applied only to the SSL training/validation distributions; probe/evaluation sets remain balanced across the 10 PID atoms.
 
 We use three family-level skews:
 
@@ -211,30 +220,31 @@ Compact comparison on the main `pair->heldout` metrics (balanced evaluation):
 
 | Training mix | Model | pair->heldout \(\kappa\) | pair->heldout `R@1` | pair->heldout Ridge \(R^2\) |
 | --- | --- | ---: | ---: | ---: |
-| Balanced | A | 0.674 | 0.1437 | 0.768 |
-| Balanced | B | 0.671 | 0.0013 | 0.769 |
-| Balanced | C | 0.666 | 0.0000 | 0.759 |
-| Balanced | D | 0.651 | 0.0003 | 0.741 |
-| Unique-heavy | A | 0.672 | 0.1367 | 0.766 |
-| Unique-heavy | B | 0.674 | 0.0010 | 0.767 |
-| Unique-heavy | C | 0.667 | 0.0003 | 0.757 |
-| Unique-heavy | D | 0.654 | 0.0003 | 0.744 |
-| Redundancy-heavy | A | 0.674 | 0.7003 | 0.766 |
-| Redundancy-heavy | B | 0.666 | 0.0003 | 0.759 |
-| Redundancy-heavy | C | 0.664 | 0.0007 | 0.754 |
-| Redundancy-heavy | D | 0.652 | 0.0003 | 0.744 |
-| Synergy-heavy | A | 0.673 | 0.7130 | 0.766 |
-| Synergy-heavy | B | 0.670 | 0.0020 | 0.763 |
-| Synergy-heavy | C | 0.666 | 0.0000 | 0.759 |
-| Synergy-heavy | D | 0.651 | 0.0007 | 0.742 |
+| Balanced | A | 0.624 | 0.0003 | 0.714 |
+| Balanced | B | 0.646 | 0.0003 | 0.740 |
+| Balanced | C | 0.639 | 0.0013 | 0.736 |
+| Balanced | D | 0.646 | 0.0000 | 0.739 |
+| Unique-heavy | A | 0.624 | 0.0010 | 0.709 |
+| Unique-heavy | B | 0.644 | 0.0017 | 0.737 |
+| Unique-heavy | C | 0.643 | 0.0003 | 0.737 |
+| Unique-heavy | D | 0.643 | 0.0003 | 0.735 |
+| Redundancy-heavy | A | 0.621 | 0.0010 | 0.712 |
+| Redundancy-heavy | B | 0.644 | 0.0007 | 0.738 |
+| Redundancy-heavy | C | 0.644 | 0.0010 | 0.737 |
+| Redundancy-heavy | D | 0.641 | 0.0010 | 0.734 |
+| Synergy-heavy | A | 0.624 | 0.0010 | 0.710 |
+| Synergy-heavy | B | 0.645 | 0.0007 | 0.737 |
+| Synergy-heavy | C | 0.644 | 0.0003 | 0.738 |
+| Synergy-heavy | D | 0.645 | 0.0007 | 0.738 |
 
 Main observations:
 
-1. The chance-corrected source->target signal is stable: `pair->heldout` macro-\(\kappa\) changes only slightly across training skews (typically within a few \(10^{-3}\) to \(10^{-2}\)).
-2. Frozen reconstruction is also stable: pair->heldout Ridge \(R^2\) moves little under the skewed training mixes.
-3. Frozen exact retrieval is highly sensitive for model A (3x unimodal SimCLR): `pair->heldout R@1` jumps from `0.1437` (balanced) to `0.7003` (redundancy-heavy) and `0.7130` (synergy-heavy), while the same jump does not appear for models `B/C/D`.
+1. Under the fixed `10k` train budget, all methods have near-random exact `pair->heldout` retrieval in `L0` (roughly `0.0000` to `0.0017` in `R@1`), including the balanced run.
+2. In contrast, chance-corrected decodability remains clearly above chance and fairly stable: `pair->heldout` macro-\(\kappa\) stays around `0.62–0.65` across methods and training skews.
+3. Frozen reconstruction is also stable and positive: pair->heldout Ridge \(R^2\) remains around `0.71–0.74`.
+4. The ranking changes relative to the earlier larger-step run: in this fixed-budget setting, `B/C/D` are stronger than `A` on \(\kappa\) and Ridge \(R^2\), while retrieval no longer separates models meaningfully.
 
-This indicates that, in `L0`, the training PID mixture changes the geometry of exact retrieval much more than it changes decodability (\(\kappa\), \(R^2\)). The effect is model-dependent and strongest for the unimodal-SimCLR baseline.
+This indicates that the earlier large retrieval effects were training-regime dependent. With fixed finite data and validation-loss checkpointing, `L0` still supports decodability comparisons (\(\kappa\), \(R^2\)), but exact retrieval becomes much less informative at this budget.
 
 ### 6.5 Strict Single-Atom Pathology Diagnostics (Reference)
 

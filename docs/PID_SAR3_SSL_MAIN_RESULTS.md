@@ -194,7 +194,20 @@ Rotated `pair->heldout` slice (macro \(R^2\), 5-fold mean \(\pm\) SE):
 
 In `L0`, reconstruction is uniformly strong and no longer dominated by near-chance behavior. This confirms that the new compositional regime is suitable for objective comparison.
 
-#### 6.4.4 Training-Mixture Sensitivity at `L0` (Balanced vs Skewed PID Mixes, Fixed 10k Train Budget)
+#### 6.4.4 Optimization Sanity Check (Fixed 10k/2k Budget)
+
+To rule out a trivial optimization failure explanation, we logged per-epoch training and validation losses for one full `L0` balanced run under the fixed finite-data regime used below (`10k` train, `2k` validation, batch size `128`, `50` epochs, best checkpoint selected by validation loss).
+
+Artifacts:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/compositional_very_easy_training_diagnostics_history.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/compositional_very_easy_training_diagnostics_loss_curves.png`
+
+![L0 fixed-budget training and validation loss curves](../test_outputs/pid_sar3_ssl_fused_confusions/compositional_very_easy_training_diagnostics_loss_curves.png)
+
+The loss curves show the expected optimization behavior: training loss decreases, validation loss decreases early and then flattens, and the selected checkpoints occur at finite epochs rather than degenerate first/last-epoch behavior. This supports the interpretation that the downstream similarities are not caused by a simple failure to optimize the SSL objectives.
+
+#### 6.4.5 Training-Mixture Sensitivity at `L0` (Balanced vs Skewed PID Mixes, Fixed 10k Train Budget)
 
 To test whether the `L0` results are stable to the SSL training distribution under a fixed finite-data budget, we reran the same `L0` bundle with:
 
@@ -245,6 +258,38 @@ Main observations:
 4. The ranking changes relative to the earlier larger-step run: in this fixed-budget setting, `B/C/D` are stronger than `A` on \(\kappa\) and Ridge \(R^2\), while retrieval no longer separates models meaningfully.
 
 This indicates that the earlier large retrieval effects were training-regime dependent. With fixed finite data and validation-loss checkpointing, `L0` still supports decodability comparisons (\(\kappa\), \(R^2\)), but exact retrieval becomes much less informative at this budget.
+
+#### 6.4.6 `R123`-Only Training Control (Fixed 10k/2k Budget)
+
+As a simple control, we trained all four methods using a true `R123`-only SSL training/validation dataset (single-atom training mode with `R123` only, i.e. no extra compositional atoms during SSL training/validation) and evaluated on the same balanced compositional `L0` downstream suite.
+
+Training distribution (`R123`-only):
+- `P(R123)=1`
+- all other PID atoms have probability `0`
+
+Artifacts:
+
+- `test_outputs/pid_sar3_ssl_fused_confusions/compositional_very_easy_source_to_target_four_models_5fold_r123_only_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/compositional_very_easy_source_to_target_four_models_5fold_r123_only_grouped_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/compositional_very_easy_retrieval_source_to_target_four_models_r123_only_summary.csv`
+- `test_outputs/pid_sar3_ssl_fused_confusions/compositional_very_easy_source_to_target_reconstruction_four_models_5fold_r123_only_grouped_summary.csv`
+
+Compact grouped comparison (`L0` balanced evaluation):
+
+| Model | Train mix | pair->heldout \(\kappa\) | pair->member \(\kappa\) | `123->target` \(\kappa\) | pair->heldout `R@1` | pair->heldout Ridge \(R^2\) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| A | Balanced | 0.624 | 0.696 | 0.701 | 0.0003 | 0.714 |
+| A | `R123`-only | 0.621 | 0.688 | 0.695 | 0.0017 | 0.706 |
+| B | Balanced | 0.646 | 0.731 | 0.732 | 0.0003 | 0.740 |
+| B | `R123`-only | 0.645 | 0.733 | 0.733 | 0.0010 | 0.739 |
+| C | Balanced | 0.639 | 0.727 | 0.727 | 0.0013 | 0.736 |
+| C | `R123`-only | 0.642 | 0.714 | 0.723 | 0.0000 | 0.736 |
+| D | Balanced | 0.646 | 0.729 | 0.731 | 0.0000 | 0.739 |
+| D | `R123`-only | 0.641 | 0.727 | 0.728 | 0.0003 | 0.736 |
+
+Main observation:
+
+The true `R123`-only training control still yields downstream \(\kappa\) and reconstruction values in the same broad range as the balanced run (especially for `B` and `D`), while exact retrieval remains near-random. This further supports the conclusion that, at this fixed `10k/2k` budget in `L0`, the current downstream decoders are reading broadly useful structure while exact-instance retrieval is not the discriminative diagnostic.
 
 ### 6.5 Strict Single-Atom Pathology Diagnostics (Reference)
 

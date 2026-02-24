@@ -141,6 +141,9 @@ def _named_pid_schedule(name: str) -> Tuple[Tuple[int, ...], Dict[int, int]]:
             8: 16,  # S13->2
             9: 15,  # S23->1
         }
+    elif key in {"r123_only", "imb_l0_r123_only"}:
+        counts = {i: 0 for i in range(10)}
+        counts[6] = 100  # R123 only
     else:
         raise ValueError(f"Unknown pid schedule name: {name}")
     sched: List[int] = []
@@ -632,6 +635,59 @@ def _train_model_a_unimodal_fixed_dataset_best_val(
         models[modality] = model
         rows.extend(hist)
     return models, rows
+
+
+def _write_training_history_and_plot(
+    rows: List[Dict[str, float]],
+    out_dir: Path,
+    prefix: str,
+) -> None:
+    if not rows:
+        return
+    cols = [
+        "model",
+        "stream",
+        "epoch",
+        "train_loss",
+        "val_loss",
+        "best_val_loss_so_far",
+        "best_epoch_so_far",
+    ]
+    with (out_dir / f"{prefix}_history.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=cols)
+        writer.writeheader()
+        for r in rows:
+            writer.writerow({k: r.get(k, "") for k in cols})
+
+    groups: Dict[Tuple[str, str], List[Dict[str, float]]] = {}
+    for r in rows:
+        groups.setdefault((str(r.get("model", "")), str(r.get("stream", ""))), []).append(r)
+    order = sorted(groups.keys())
+    n = len(order)
+    ncols = 2
+    nrows = int(np.ceil(n / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(11.5, 3.2 * nrows), squeeze=False)
+    for ax in axes.ravel():
+        ax.axis("off")
+    for ax, key in zip(axes.ravel(), order):
+        ax.axis("on")
+        rs = sorted(groups[key], key=lambda r: float(r["epoch"]))
+        x = [float(r["epoch"]) for r in rs]
+        tr = [float(r["train_loss"]) for r in rs]
+        va = [float(r["val_loss"]) for r in rs]
+        best_epoch = int(float(rs[-1]["best_epoch_so_far"])) if rs else 0
+        ax.plot(x, tr, label="train", color="#4c78a8", linewidth=2.0)
+        ax.plot(x, va, label="val", color="#e45756", linewidth=2.0)
+        if best_epoch > 0:
+            ax.axvline(best_epoch, color="black", linestyle="--", linewidth=1.0, alpha=0.6)
+        ax.set_title(f"{key[0]} | {key[1]}")
+        ax.set_xlabel("epoch")
+        ax.set_ylabel("loss")
+        ax.grid(alpha=0.25)
+        ax.legend(frameon=False, fontsize=8)
+    fig.suptitle("Training/validation loss curves (best checkpoint by val loss)", y=1.01)
+    fig.tight_layout()
+    _savefig(out_dir / f"{prefix}_loss_curves.png")
 
 
 def _evaluate_all_tasks(Xtr: np.ndarray, train_batch: Dict[str, np.ndarray], Xte: np.ndarray, test_batch: Dict[str, np.ndarray]) -> Dict[str, float]:
@@ -2881,6 +2937,7 @@ def test_analysis_bundle_four_models_compositional_very_easy():
     output_suffix = str(os.getenv("PIDSSL_L0_OUTPUT_SUFFIX", "")).strip()
     pid_schedule, pid_counts = _named_pid_schedule(train_pid_schedule_name)
     suffix = f"_{output_suffix}" if output_suffix else ""
+    train_history_rows: List[Dict[str, float]] = []
     ssl_gen = PIDSar3DatasetGenerator(data_cfg)
     enc_cfg = SSLEncoderConfig(input_dim=data_cfg.d, encoder_hidden_dim=96, representation_dim=48, projector_hidden_dim=96, projector_dim=48)
     train_cfg = SSLTrainConfig(
@@ -2905,33 +2962,43 @@ def test_analysis_bundle_four_models_compositional_very_easy():
         # Fix rounding drift while preserving non-negativity.
         train_counts[0] += int(n_train_total - sum(train_counts.values()))
         val_counts[0] += int(n_val_total - sum(val_counts.values()))
-        train_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": int(data_cfg.seed) + 11}))
-        val_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**{**data_cfg.__dict__, "seed": int(data_cfg.seed) + 23}))
+        train_data_cfg_dict = {**data_cfg.__dict__, "seed": int(data_cfg.seed) + 11}
+        val_data_cfg_dict = {**data_cfg.__dict__, "seed": int(data_cfg.seed) + 23}
+        if train_pid_schedule_name.strip().lower() in {"r123_only", "imb_l0_r123_only"}:
+            # True R123-only control: disable extra compositional atoms during SSL training/validation.
+            train_data_cfg_dict["composition_mode"] = "single_atom"
+            train_data_cfg_dict["active_atoms_per_sample"] = 1
+            val_data_cfg_dict["composition_mode"] = "single_atom"
+            val_data_cfg_dict["active_atoms_per_sample"] = 1
+        train_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**train_data_cfg_dict))
+        val_gen = PIDSar3DatasetGenerator(PIDDatasetConfig(**val_data_cfg_dict))
         ssl_train_batch = _batch_from_pid_counts(train_gen, train_counts, shuffle_seed=41, return_aux=False)
         ssl_val_batch = _batch_from_pid_counts(val_gen, val_counts, shuffle_seed=43, return_aux=False)
-        unimodal_models, _ = _train_model_a_unimodal_fixed_dataset_best_val(
+        unimodal_models, hist_a = _train_model_a_unimodal_fixed_dataset_best_val(
             enc_cfg, train_cfg, ssl_train_batch, ssl_val_batch, epochs=int(epochs)
         )
-        model_b, _ = _train_trimodal_objective_fixed_dataset_best_val(
+        model_b, hist_b = _train_trimodal_objective_fixed_dataset_best_val(
             enc_cfg, train_cfg, "pairwise_simclr", ssl_train_batch, ssl_val_batch, epochs=int(epochs), model_name="sum_3_pairwise_infonce"
         )
-        model_c, _ = _train_trimodal_objective_fixed_dataset_best_val(
+        model_c, hist_c = _train_trimodal_objective_fixed_dataset_best_val(
             enc_cfg, train_cfg, "triangle_exact", ssl_train_batch, ssl_val_batch, epochs=int(epochs), model_name="triangle_exact"
         )
-        model_d, _ = _train_trimodal_objective_fixed_dataset_best_val(
+        model_d, hist_d = _train_trimodal_objective_fixed_dataset_best_val(
             enc_cfg, train_cfg, "confu_style", ssl_train_batch, ssl_val_batch, epochs=int(epochs), model_name="confu_style"
         )
+        train_history_rows = hist_a + hist_b + hist_c + hist_d
     else:
-        unimodal_models, _ = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, train_cfg, pid_schedule=pid_schedule)
-        model_b, _ = _train_trimodal_objective(
+        unimodal_models, hist_a = _train_model_a_unimodal_sum_simclr(ssl_gen, enc_cfg, train_cfg, pid_schedule=pid_schedule)
+        model_b, hist_b = _train_trimodal_objective(
             ssl_gen, enc_cfg, train_cfg, "pairwise_simclr", "sum_3_pairwise_infonce", pid_schedule=pid_schedule
         )
-        model_c, _ = _train_trimodal_objective(
+        model_c, hist_c = _train_trimodal_objective(
             ssl_gen, enc_cfg, train_cfg, "triangle_exact", "triangle_exact", pid_schedule=pid_schedule
         )
-        model_d, _ = _train_trimodal_objective(
+        model_d, hist_d = _train_trimodal_objective(
             ssl_gen, enc_cfg, train_cfg, "confu_style", "confu_style", pid_schedule=pid_schedule
         )
+        train_history_rows = hist_a + hist_b + hist_c + hist_d
     if train_device != "cpu":
         for m in unimodal_models.values():
             m.cpu()
@@ -3282,6 +3349,11 @@ def test_analysis_bundle_four_models_compositional_very_easy():
         writer.writeheader()
         for r in _pid_counts_rows(train_pid_schedule_name, pid_counts):
             writer.writerow(r)
+    _write_training_history_and_plot(
+        train_history_rows,
+        out_dir=out_dir,
+        prefix=f"compositional_very_easy_training_diagnostics{suffix}",
+    )
 
     assert len(kappa_summary_rows) == 4 * 4 * 3
     assert len(retrieval_rows) == 4 * 7 * 3

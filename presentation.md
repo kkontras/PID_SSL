@@ -179,7 +179,28 @@ Derived from <code>test_outputs/pid_sar3_ssl_fused_confusions/compositional_very
 
 <p><small>
 These are the actual family-only train/val runs from <code>run_l0_family_only_probes.sh</code>.
-Each figure is a 1x4 panel (A/B/C/D); together they form the requested 3x4 view.
+Table below reports <b>test-set Cohen's &kappa;</b> from the family-only probe CSVs. Each figure is a 1x4 panel (A/B/C/D); together they form the requested 3x4 view.
+</small></p>
+
+<table>
+  <thead>
+    <tr>
+      <th align="left">Model</th>
+      <th align="right">unique_only</th>
+      <th align="right">redundancy_only</th>
+      <th align="right">synergy_only</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>A: Unimodal SimCLR</td><td align="right">0.1200</td><td align="right">0.0567</td><td align="right">0.0700</td></tr>
+    <tr><td>B: Pairwise InfoNCE</td><td align="right">0.1200</td><td align="right">0.0383</td><td align="right">0.0550</td></tr>
+    <tr><td>C: TRIANGLE</td><td align="right">0.0875</td><td align="right">0.0433</td><td align="right">0.0775</td></tr>
+    <tr><td>D: ConFu</td><td align="right">0.0825</td><td align="right">0.0317</td><td align="right">0.0275</td></tr>
+  </tbody>
+</table>
+
+<p><small>
+Source CSVs: <code>l0_exp_unique_only.csv</code>, <code>l0_exp_redundancy_only.csv</code>, <code>l0_exp_synergy_only.csv</code> (field <code>probe_kappa</code>).
 </small></p>
 
 <figure>

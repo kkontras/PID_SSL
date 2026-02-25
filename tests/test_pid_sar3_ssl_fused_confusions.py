@@ -4055,7 +4055,7 @@ def _run_fixed_data_probe_for_all_objectives(
     Returns:
         rows:  one row per objective with keys
                experiment, model, n_train, n_probe, n_classes,
-               probe_acc, overfit_drift, best_epoch
+               probe_acc, probe_kappa, overfit_drift, best_epoch
         hists: dict mapping model label → per-epoch history list
                (keys: epoch, train_loss, val_loss, best_val_loss_so_far, best_epoch_so_far)
     """
@@ -4102,6 +4102,7 @@ def _run_fixed_data_probe_for_all_objectives(
         "experiment": exp_name, "model": "A_unimodal_simclr",
         "n_train": n_train, "n_probe": n_probe, "n_classes": n_classes,
         "probe_acc": float(res_a["acc"][0]),
+        "probe_kappa": float(cohen_kappa_score(ypr, res_a["pred"])),
         "overfit_drift": a_drift, "best_epoch": a_best_ep,
     })
     # Average the 3 unimodal streams per epoch for a single curve.
@@ -4139,6 +4140,7 @@ def _run_fixed_data_probe_for_all_objectives(
             "experiment": exp_name, "model": model_label,
             "n_train": n_train, "n_probe": n_probe, "n_classes": n_classes,
             "probe_acc": float(res["acc"][0]),
+            "probe_kappa": float(cohen_kappa_score(ypr, res["pred"])),
             "overfit_drift": drift, "best_epoch": best_ep,
         })
         hists[model_label] = history
@@ -4148,7 +4150,7 @@ def _run_fixed_data_probe_for_all_objectives(
 
 def _write_exp_csv(rows: List[Dict], path: Path) -> None:
     cols = ["experiment", "model", "n_train", "n_probe", "n_classes",
-            "probe_acc", "overfit_drift", "best_epoch"]
+            "probe_acc", "probe_kappa", "overfit_drift", "best_epoch"]
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=cols)
         writer.writeheader()

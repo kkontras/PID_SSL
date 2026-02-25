@@ -118,9 +118,9 @@ Aggregation test: `test_l0_aggregate_family_compositional_results` → writes MD
 
 | Experiment | n_cls | Random | A: Unimodal | B: Pairwise | C: Triangle | D: ConFu | Best (gap) |
 |---|---|---|---|---|---|---|---|
-| unique_only      | 3  | 33.3% | 35.5% | **41.5%** | 38.3% | 39.2% | B (+8.2pp) |
-| redundancy_only  | 4  | 25.0% | **29.9%** | 28.1% | 28.2% | 27.1% | A (+4.9pp) |
-| synergy_only     | 3  | 33.3% | 36.0% | 37.3% | **38.3%** | 35.2% | C (+5.0pp) |
+| unique_only      | 3  | 33.3% | **41.1%** | 38.2% | 37.8% | 39.7% | A (+7.8pp) |
+| redundancy_only  | 4  | 25.0% | 27.8% | 26.6% | 28.6% | **30.1%** | D (+5.1pp) |
+| synergy_only     | 3  | 33.3% | 35.2% | 34.1% | **36.8%** | 36.7% | C (+3.4pp) |
 | single_atom_all10| 10 | 10.0% | 10.8% | 11.7% | **12.4%** | 11.1% | C (+2.4pp) |
 
 ### Key conclusions
@@ -142,8 +142,9 @@ Aggregation test: `test_l0_aggregate_family_compositional_results` → writes MD
    - Adding the same augmentation to `_compute_trimodal_ssl_loss` or its callers
      should stabilise joint model training dramatically.
 
-4. **Family restriction only modestly helps** — reducing from 10 to 3-4 classes gives
-   +2–8pp gains, but the fundamental memorisation problem remains.
+4. **Family restriction only modestly helps** — in the latest rerun:
+   unique-only peaks at `41.1%` (A), redundancy-only at `30.1%` (D), synergy-only at `36.8%` (C);
+   all are only a few points above random, so the fixed-data memorisation problem remains.
 
 ---
 

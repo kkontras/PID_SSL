@@ -107,7 +107,7 @@ Synergy swaps pair-heldout/member semantics (because the target synergy term is 
 Redundancy has no <code>heldout</code> case under pair/triple sources, so that column is <code>N/A</code>.
 </small></p>
 
-## Redundancy-Heavy Train Mix (L0) — Family-Aware Cohen's &kappa; Breakdown
+## Redundancy-Heavy Train Mix (L0) — Family-Aware Cohen's &kappa; Breakdown (Derived Task-Regime View)
 
 <p><small>
 Derived from <code>test_outputs/pid_sar3_ssl_fused_confusions/compositional_very_easy_source_to_target_four_models_5fold_imb_l0_redundancy_heavy_summary.csv</code>
@@ -141,7 +141,7 @@ Derived from <code>test_outputs/pid_sar3_ssl_fused_confusions/compositional_very
   </tbody>
 </table>
 
-## Synergy-Heavy Train Mix (L0) — Family-Aware Cohen's &kappa; Breakdown
+## Synergy-Heavy Train Mix (L0) — Family-Aware Cohen's &kappa; Breakdown (Derived Task-Regime View)
 
 <p><small>
 Derived from <code>test_outputs/pid_sar3_ssl_fused_confusions/compositional_very_easy_source_to_target_four_models_5fold_imb_l0_synergy_heavy_summary.csv</code>
@@ -172,6 +172,41 @@ Derived from <code>test_outputs/pid_sar3_ssl_fused_confusions/compositional_very
     <tr><td>Synergy</td><td>B: pairwise InfoNCE</td><td align="right">0.728</td><td align="right">0.645</td><td align="right">0.732</td></tr>
     <tr><td>Synergy</td><td>C: TRIANGLE</td><td align="right">0.730</td><td align="right">0.644</td><td align="right">0.730</td></tr>
     <tr><td>Synergy</td><td>D: ConFu</td><td align="right">0.729</td><td align="right">0.645</td><td align="right">0.732</td></tr>
+  </tbody>
+</table>
+
+## True Family-Only Probe Results (Train + Test Restricted)
+
+<p><small>
+These are the actual family-only runs produced by <code>run_l0_family_only_probes.sh</code> (not derived from source-&gt;target task grouping).
+Source files: <code>l0_exp_unique_only.csv</code>, <code>l0_exp_redundancy_only.csv</code>, <code>l0_exp_synergy_only.csv</code>.
+</small></p>
+
+<table>
+  <thead>
+    <tr>
+      <th align="left">Dataset</th>
+      <th align="left">Model</th>
+      <th align="right">probe_acc</th>
+      <th align="right">overfit_drift</th>
+      <th align="right">best_epoch</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><b>unique_only</b></td><td>A: Unimodal</td><td align="right">41.11%</td><td align="right">0.057</td><td align="right">40.7</td></tr>
+    <tr><td>unique_only</td><td>B: Pairwise InfoNCE</td><td align="right">38.17%</td><td align="right">0.302</td><td align="right">7.0</td></tr>
+    <tr><td>unique_only</td><td>C: TRIANGLE</td><td align="right">37.78%</td><td align="right">0.023</td><td align="right">46.0</td></tr>
+    <tr><td>unique_only</td><td>D: ConFu</td><td align="right">39.72%</td><td align="right">0.517</td><td align="right">1.0</td></tr>
+    <tr><td colspan="5"><hr /></td></tr>
+    <tr><td><b>redundancy_only</b></td><td>A: Unimodal</td><td align="right">27.79%</td><td align="right">0.060</td><td align="right">40.3</td></tr>
+    <tr><td>redundancy_only</td><td>B: Pairwise InfoNCE</td><td align="right">26.58%</td><td align="right">1.928</td><td align="right">1.0</td></tr>
+    <tr><td>redundancy_only</td><td>C: TRIANGLE</td><td align="right">28.62%</td><td align="right">0.521</td><td align="right">2.0</td></tr>
+    <tr><td>redundancy_only</td><td>D: ConFu</td><td align="right">30.08%</td><td align="right">1.399</td><td align="right">3.0</td></tr>
+    <tr><td colspan="5"><hr /></td></tr>
+    <tr><td><b>synergy_only</b></td><td>A: Unimodal</td><td align="right">35.22%</td><td align="right">0.058</td><td align="right">30.3</td></tr>
+    <tr><td>synergy_only</td><td>B: Pairwise InfoNCE</td><td align="right">34.11%</td><td align="right">1.390</td><td align="right">2.0</td></tr>
+    <tr><td>synergy_only</td><td>C: TRIANGLE</td><td align="right">36.78%</td><td align="right">0.669</td><td align="right">2.0</td></tr>
+    <tr><td>synergy_only</td><td>D: ConFu</td><td align="right">36.72%</td><td align="right">1.662</td><td align="right">3.0</td></tr>
   </tbody>
 </table>
 

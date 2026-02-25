@@ -4044,7 +4044,7 @@ def _run_fixed_data_probe_for_all_objectives(
     base_cfg: SSLTrainConfig,
     epochs: int,
     device: str,
-) -> List[Dict]:
+) -> Tuple[List[Dict], Dict[str, List[Dict]]]:
     """
     Shared worker used by all per-family / compositional probe experiments.
 
@@ -4052,9 +4052,12 @@ def _run_fixed_data_probe_for_all_objectives(
     D: confu) on fixed datasets defined by pid_counts/val_counts/probe_counts.
     Evaluates a frozen linear probe (LogisticRegression) on the probe set.
 
-    Returns one row per objective with keys:
-        experiment, model, n_train, n_probe, n_classes,
-        probe_acc, overfit_drift, best_epoch
+    Returns:
+        rows:  one row per objective with keys
+               experiment, model, n_train, n_probe, n_classes,
+               probe_acc, overfit_drift, best_epoch
+        hists: dict mapping model label → per-epoch history list
+               (keys: epoch, train_loss, val_loss, best_val_loss_so_far, best_epoch_so_far)
     """
     active_pids = sorted(k for k, v in pid_counts.items() if v > 0)
     n_classes = len(active_pids)
@@ -4074,6 +4077,7 @@ def _run_fixed_data_probe_for_all_objectives(
     ypr    = probe_batch["pid_id"].astype(np.int64)
 
     rows: List[Dict] = []
+    hists: Dict[str, List[Dict]] = {}
 
     # --- Model A: three unimodal SimCLR encoders ---
     unimodal_models, hist_a = _train_model_a_unimodal_fixed_dataset_best_val(
@@ -4100,6 +4104,18 @@ def _run_fixed_data_probe_for_all_objectives(
         "probe_acc": float(res_a["acc"][0]),
         "overfit_drift": a_drift, "best_epoch": a_best_ep,
     })
+    # Average the 3 unimodal streams per epoch for a single curve.
+    all_eps_a = sorted(set(float(r["epoch"]) for r in hist_a))
+    hists["A_unimodal_simclr"] = [
+        {
+            "epoch": ep,
+            "train_loss": float(np.mean([float(r["train_loss"]) for r in hist_a if float(r["epoch"]) == ep])),
+            "val_loss":   float(np.mean([float(r["val_loss"])   for r in hist_a if float(r["epoch"]) == ep])),
+            "best_val_loss_so_far": float(np.mean([float(r["best_val_loss_so_far"]) for r in hist_a if float(r["epoch"]) == ep])),
+            "best_epoch_so_far":    float(np.mean([float(r["best_epoch_so_far"])    for r in hist_a if float(r["epoch"]) == ep])),
+        }
+        for ep in all_eps_a
+    ]
 
     # --- Models B / C / D: joint trimodal objectives ---
     for i, (objective, model_label) in enumerate([
@@ -4125,8 +4141,9 @@ def _run_fixed_data_probe_for_all_objectives(
             "probe_acc": float(res["acc"][0]),
             "overfit_drift": drift, "best_epoch": best_ep,
         })
+        hists[model_label] = history
 
-    return rows
+    return rows, hists
 
 
 def _write_exp_csv(rows: List[Dict], path: Path) -> None:
@@ -4137,6 +4154,67 @@ def _write_exp_csv(rows: List[Dict], path: Path) -> None:
         writer.writeheader()
         for r in rows:
             writer.writerow(r)
+
+
+def _save_exp_curves(
+    exp_name: str,
+    rows: List[Dict],
+    hists: Dict[str, List[Dict]],
+    out_dir: Path,
+) -> Path:
+    """
+    Generate a 1×4 train/val loss curve plot for one experiment.
+    One subplot per model (A, B, C, D).  Returns the saved path.
+    """
+    model_order  = ["A_unimodal_simclr", "B_pairwise_infonce", "C_triangle_exact", "D_confu_style"]
+    model_titles = {
+        "A_unimodal_simclr": "A: Unimodal SimCLR",
+        "B_pairwise_infonce": "B: Pairwise InfoNCE",
+        "C_triangle_exact":   "C: TRIANGLE",
+        "D_confu_style":      "D: ConFu",
+    }
+    row_lookup = {r["model"]: r for r in rows}
+
+    fig, axes = plt.subplots(1, 4, figsize=(15, 3.5), sharey=False)
+    for ax, mkey in zip(axes, model_order):
+        hist = hists.get(mkey, [])
+        meta = row_lookup.get(mkey, {})
+        probe_acc   = float(meta.get("probe_acc",   float("nan")))
+        drift       = float(meta.get("overfit_drift", float("nan")))
+        best_ep     = float(meta.get("best_epoch",  float("nan")))
+        n_cls       = int(meta.get("n_classes", 0))
+        rand        = 1.0 / n_cls if n_cls > 0 else float("nan")
+
+        if hist:
+            ep  = [float(r["epoch"]) for r in hist]
+            tr  = [float(r["train_loss"]) for r in hist]
+            va  = [float(r["val_loss"])   for r in hist]
+            ax.plot(ep, tr, color="#4c78a8", linewidth=2.0, label="train")
+            ax.plot(ep, va, color="#e45756", linewidth=2.0, label="val")
+            if not np.isnan(best_ep) and best_ep > 0:
+                ax.axvline(best_ep, color="black", linestyle="--", linewidth=1.2,
+                           alpha=0.7, label=f"best ep={int(best_ep)}")
+        ax.set_title(
+            f"{model_titles.get(mkey, mkey)}\n"
+            f"probe={probe_acc:.1%}  (+{(probe_acc-rand)*100:.1f}pp)  drift={drift:+.3f}",
+            fontsize=8.5,
+        )
+        ax.set_xlabel("epoch", fontsize=8)
+        ax.set_ylabel("loss", fontsize=8)
+        ax.tick_params(labelsize=7)
+        ax.grid(alpha=0.25)
+        ax.legend(frameon=False, fontsize=7)
+
+    n_train = int(rows[0]["n_train"]) if rows else 0
+    n_cls   = int(rows[0]["n_classes"]) if rows else 0
+    fig.suptitle(
+        f"{exp_name}  |  {n_cls}-class probe  |  {n_train} train samples",
+        fontsize=10, fontweight="bold", y=1.02,
+    )
+    fig.tight_layout()
+    out_path = out_dir / f"l0_exp_{exp_name}_curves.png"
+    _savefig(out_path)
+    return out_path
 
 
 def _exp_base_configs(device: str, epochs: int, n_per_pid: int) -> Tuple[SSLEncoderConfig, SSLTrainConfig]:
@@ -4183,11 +4261,12 @@ def test_l0_family_unique_probe():
     val_counts   = {i: (n_val    if i in active else 0) for i in range(10)}
     probe_counts = {i: (n_val    if i in active else 0) for i in range(10)}
 
-    rows = _run_fixed_data_probe_for_all_objectives(
+    rows, hists = _run_fixed_data_probe_for_all_objectives(
         "unique_only", data_cfg, pid_counts, val_counts, probe_counts,
         enc_cfg, base_cfg, epochs, device,
     )
     _write_exp_csv(rows, out_dir / "l0_exp_unique_only.csv")
+    _save_exp_curves("unique_only", rows, hists, out_dir)
 
     # At least one model should exceed random chance by 10+ pp.
     assert max(r["probe_acc"] for r in rows) > 1.0 / 3 + 0.05, (
@@ -4216,11 +4295,12 @@ def test_l0_family_redundancy_probe():
     val_counts   = {i: (n_val    if i in active else 0) for i in range(10)}
     probe_counts = {i: (n_val    if i in active else 0) for i in range(10)}
 
-    rows = _run_fixed_data_probe_for_all_objectives(
+    rows, hists = _run_fixed_data_probe_for_all_objectives(
         "redundancy_only", data_cfg, pid_counts, val_counts, probe_counts,
         enc_cfg, base_cfg, epochs, device,
     )
     _write_exp_csv(rows, out_dir / "l0_exp_redundancy_only.csv")
+    _save_exp_curves("redundancy_only", rows, hists, out_dir)
 
     assert max(r["probe_acc"] for r in rows) > 1.0 / 4 + 0.05, (
         f"No model exceeded random chance on redundancy_only: {[r['probe_acc'] for r in rows]}"
@@ -4248,11 +4328,12 @@ def test_l0_family_synergy_probe():
     val_counts   = {i: (n_val    if i in active else 0) for i in range(10)}
     probe_counts = {i: (n_val    if i in active else 0) for i in range(10)}
 
-    rows = _run_fixed_data_probe_for_all_objectives(
+    rows, hists = _run_fixed_data_probe_for_all_objectives(
         "synergy_only", data_cfg, pid_counts, val_counts, probe_counts,
         enc_cfg, base_cfg, epochs, device,
     )
     _write_exp_csv(rows, out_dir / "l0_exp_synergy_only.csv")
+    _save_exp_curves("synergy_only", rows, hists, out_dir)
 
     assert max(r["probe_acc"] for r in rows) > 1.0 / 3 + 0.05, (
         f"No model exceeded random chance on synergy_only: {[r['probe_acc'] for r in rows]}"
@@ -4279,11 +4360,12 @@ def test_l0_compositional_single_atom_all10_probe():
     val_counts   = {i: n_val     for i in range(10)}
     probe_counts = {i: n_val     for i in range(10)}
 
-    rows = _run_fixed_data_probe_for_all_objectives(
+    rows, hists = _run_fixed_data_probe_for_all_objectives(
         "single_atom_all10", data_cfg, pid_counts, val_counts, probe_counts,
         enc_cfg, base_cfg, epochs, device,
     )
     _write_exp_csv(rows, out_dir / "l0_exp_single_atom_all10.csv")
+    _save_exp_curves("single_atom_all10", rows, hists, out_dir)
 
     # Expect at least one model to exceed random chance (10%) noticeably.
     assert max(r["probe_acc"] for r in rows) > 0.12, (
@@ -4317,11 +4399,12 @@ def test_l0_compositional_multi_atom_2_probe():
     val_counts   = {i: n_val     for i in range(10)}
     probe_counts = {i: n_val     for i in range(10)}
 
-    rows = _run_fixed_data_probe_for_all_objectives(
+    rows, hists = _run_fixed_data_probe_for_all_objectives(
         "multi_atom_2", data_cfg, pid_counts, val_counts, probe_counts,
         enc_cfg, base_cfg, epochs, device,
     )
     _write_exp_csv(rows, out_dir / "l0_exp_multi_atom_2.csv")
+    _save_exp_curves("multi_atom_2", rows, hists, out_dir)
     # Diagnostic only — no strong assertion; we expect degraded accuracy.
 
 
@@ -4345,11 +4428,12 @@ def test_l0_compositional_multi_atom_5_probe():
     val_counts   = {i: n_val     for i in range(10)}
     probe_counts = {i: n_val     for i in range(10)}
 
-    rows = _run_fixed_data_probe_for_all_objectives(
+    rows, hists = _run_fixed_data_probe_for_all_objectives(
         "multi_atom_5", data_cfg, pid_counts, val_counts, probe_counts,
         enc_cfg, base_cfg, epochs, device,
     )
     _write_exp_csv(rows, out_dir / "l0_exp_multi_atom_5.csv")
+    _save_exp_curves("multi_atom_5", rows, hists, out_dir)
     # Diagnostic only — expected near-random performance.
 
 
@@ -4463,46 +4547,21 @@ def test_l0_aggregate_family_compositional_results():
 
     lines.append("")
 
-    # --- Training dynamics sparklines ---
-    # Each row: approx val-loss trajectory over PIDSSL_EXP_EPOCHS (default 50).
-    # Built from best_epoch and overfit_drift in the CSVs (no history saved).
-    # Symbol key: ▼ improving, ★ best epoch, ▲ overfitting (drift > 0.3),
-    #             ~ mild rise (drift 0.05–0.3), ─ stable (drift ≤ 0.05).
-    n_ep = 50
-    width = 32
-
-    lines.append("## Training dynamics (val-loss sparklines)\n")
-    lines.append("Indicative val-loss trajectories derived from `best_epoch` and `overfit_drift`.")
-    lines.append("Each bar spans 50 epochs. `▼` = improving, `★` = best epoch,")
-    lines.append("`▲` = overfitting (drift > 0.3), `~` = mild rise (0.05–0.3), `─` = stable (≤ 0.05).\n")
+    # --- Train/Val loss curve images (generated by each experiment test) ---
+    lines.append("## Train/Val Loss Curves\n")
+    lines.append("Each plot shows train loss (blue) and val loss (red) over epochs for all four")
+    lines.append("objectives. The dashed vertical line marks the best val-loss checkpoint epoch.")
+    lines.append("Subplot titles include frozen probe accuracy and overfitting drift.\n")
 
     for exp_name, _, _ in exp_specs:
-        if exp_name not in all_dfs:
-            lines.append(f"**{exp_name}** — *not run*\n")
-            continue
-        df = all_dfs[exp_name]
-        lines.append(f"**{exp_name}**")
-        lines.append("```")
-        for m in model_order:
-            mrows = df[df["model"] == m]
-            if mrows.empty:
-                continue
-            best_ep  = int(float(mrows["best_epoch"].iloc[0]))
-            drift    = float(mrows["overfit_drift"].iloc[0])
-            probe_ac = float(mrows["probe_acc"].iloc[0])
-            n_cls    = int(float(mrows["n_classes"].iloc[0]))
-            rand     = 1.0 / n_cls
-            gap_pp   = (probe_ac - rand) * 100.0
-            n_down   = max(1, min(round(best_ep / n_ep * width), width - 1))
-            n_after  = width - n_down - 1
-            fill = "▲" if drift > 0.3 else ("~" if drift > 0.05 else "─")
-            sparkline = "▼" * n_down + "★" + fill * n_after
-            label = model_labels.get(m, m)
-            lines.append(
-                f"  {label:<13} ep{best_ep:>2}/{n_ep}  drift={drift:+.3f}  probe={probe_ac:.1%} ({gap_pp:+.1f}pp)  |{sparkline}|"
-            )
-        lines.append("```")
-        lines.append("")
+        img_fname = f"l0_exp_{exp_name}_curves.png"
+        img_path  = out_dir / img_fname
+        if img_path.exists():
+            lines.append(f"### {exp_name}\n")
+            lines.append(f"![]({img_fname})\n")
+        else:
+            lines.append(f"### {exp_name}\n")
+            lines.append(f"*Curves not yet generated — re-run `test_l0_{'_'.join(exp_name.split('_'))}_probe`.*\n")
 
     # --- Interpretation notes ---
     lines.append("## Key findings\n")

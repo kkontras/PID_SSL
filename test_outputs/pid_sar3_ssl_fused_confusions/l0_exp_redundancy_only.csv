@@ -1,0 +1,5 @@
+experiment,model,n_train,n_probe,n_classes,probe_acc,overfit_drift,best_epoch
+redundancy_only,A_unimodal_simclr,4000,800,4,0.29875001311302185,0.044905503590901695,34.333333333333336
+redundancy_only,B_pairwise_infonce,4000,800,4,0.28125,0.9093345233372285,5.0
+redundancy_only,C_triangle_exact,4000,800,4,0.2824999988079071,0.37778224263872406,4.0
+redundancy_only,D_confu_style,4000,800,4,0.27125000953674316,0.6087840625217984,3.0

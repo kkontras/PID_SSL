@@ -1,0 +1,70 @@
+# Local tool settings
+.claude/
+.DS_Store
+Thumbs.db
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+site/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter and editor state
+.ipynb_checkpoints/
+*.swp
+*.swo
+*~
+
+# Environment files and local secrets
+.env
+.env.*
+*.local
+
+# Logs and job scheduler output
+*.log
+*.out
+*.err
+condor_logs/logs/
+condor_logs/condor/
+condor_logs/**/*.job
+condor_logs/**/*.args
+condor_logs/**/*.csv
+condor_logs/**/*.json
+
+# Experiment outputs, checkpoints, and temporary exports
+test_outputs/
+checkpoints/
+ckpts/
+runs/
+wandb/
+mlruns/
+tensorboard/
+tb_logs/
+
+# Model/data artifacts
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.pickle
+*.joblib
+*.npy
+*.npz

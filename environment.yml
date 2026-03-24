@@ -1,0 +1,6 @@
+name: pid_ssl
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - ffmpeg=5

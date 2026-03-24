@@ -1,2 +1,0 @@
-output_suffix,train_pid_schedule_name,train_mode,ssl_steps,batch_size,epochs,n_train_total,n_val_total,probe_n_per_pid,n_folds,train_device
-imb_l0_synergy_heavy,imb_l0_synergy_heavy,epoch_val_select,180.0,128.0,50.0,10000.0,2000.0,100.0,5.0,cuda

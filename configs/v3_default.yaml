@@ -1,0 +1,73 @@
+# V3 Default Configuration
+Q: 7
+D: 44
+D_info: 4
+active_atoms:
+  - uniq_1
+  - uniq_2
+  - uniq_3
+  - red_12
+  - syn_12
+sigma_info: 0.01
+mu_bg: 0.75
+sigma_bg: 0.3
+n_samples: 50000
+seed: 42
+
+# Model
+d_model: 64
+n_heads: 4
+n_layers: 2
+d_ff: 128
+n_patches: 4
+d_z: 64
+proj_hidden: 128
+encoder_dropout: 0.0
+share_encoder_weights: false
+fusion_dropout: 0.1
+fusion_mask_prob: 0.0
+
+# Training
+lr: 1.0e-3
+weight_decay: 1.0e-4
+batch_size: 512
+epochs: 200
+temperature: 0.07
+lambda_contr: 0.1
+
+# Methods
+methods:
+  - none
+  - simclr
+  - pairwise_nce
+  - triangle
+  - confu
+
+# Experiment configs
+single_atom_configs:
+  - A1
+  - A2
+  - A3
+  - A4
+  - A5
+  - A6
+  - A7
+  - A8
+  - A9
+  - A10
+  - A11
+  - A12
+  - A13
+  - A14
+
+multi_atom_configs:
+  - B1
+  - B2
+  - B3
+  - B4
+  - B5
+  - B6
+  - B7
+  - B8
+  - B9
+  - B10

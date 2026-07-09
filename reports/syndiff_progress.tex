@@ -3,8 +3,8 @@
 \usepackage{longtable}\usepackage{amsmath}\usepackage{amssymb}
 \begin{document}
 \begin{center}{\Large\textbf{SynDiff Synthetic Benchmark — Live Progress}}\\[4pt]
-2026-07-09 22:31:47 CEST\\[2pt]
-\textbf{563/942} jobs complete (59.8\%)\end{center}
+2026-07-09 23:01:51 CEST\\[2pt]
+\textbf{603/942} jobs complete (64.0\%)\end{center}
 \vspace{6pt}
 S $=$ I(X$_1$;Y$|$X$_2$) $-$ I(X$_1$;Y) in nats; S$>$0 synergy-dominant, S$<$0 redundancy-dominant. SynDiff (ours) vs prior estimators.
 \section*{Dataset construction}
@@ -27,19 +27,19 @@ P1 & mine & \color{green!50!black}96 & 96\\
 P1 & plugin & 2 & 6\\
 P1 & syndiff & \color{green!50!black}96 & 96\\
 P2 & batch\_pid & 30 & 90\\
-P2 & infonce & 30 & 90\\
-P2 & minde\_comp & 25 & 90\\
-P2 & mine & 30 & 90\\
-P2 & syndiff & 30 & 90\\
+P2 & infonce & 39 & 90\\
+P2 & minde\_comp & 37 & 90\\
+P2 & mine & 39 & 90\\
+P2 & syndiff & 40 & 90\\
 \bottomrule\end{tabular}
 \section*{Accuracy vs ground truth (completed cells, lower error better)}
 \begin{tabular}{lrrr}\toprule Method & \#cells & mean $|$est$-$truth$|$ & sign acc\\\midrule
-minde\_comp & 41 & 0.0670 & 0.88\\
+minde\_comp & 45 & 0.1168 & 0.82\\
 plugin & 2 & 0.1343 & 1.00\\
-\textbf{syndiff} & 42 & \textbf{0.1876} & 0.90\\
+\textbf{syndiff} & 46 & \textbf{0.1807} & 0.89\\
 batch\_pid & 62 & 0.3669 & 0.74\\
-mine & 42 & 0.8196 & 0.64\\
-infonce & 42 & 4.7350 & 0.40\\
+mine & 45 & 0.8173 & 0.60\\
+infonce & 45 & 4.5639 & 0.38\\
 \bottomrule\end{tabular}
 \section*{SynDiff vs prior — head to head (nats)}
 \footnotesize\begin{longtable}{lrrrrrrr}\toprule Cell & truth & \textbf{SynDiff} & batch\_pid & minde\_comp & mine & infonce & plugin\\\midrule\endhead
@@ -75,13 +75,17 @@ p1\_ns\_rhon0p7\_sy1\_d8\_n100k & +0.177 & \textbf{+0.157} & +0.149 & +0.180 & -
 p1\_ns\_rhon0p7\_sy1\_d8\_n1k & +0.177 & \textbf{+0.160} & +0.148 & +0.183 & -0.497 & -5.338 & --\\
 p1\_ns\_rhon0p7\_sy1\_d8\_n20k & +0.177 & \textbf{+0.154} & +0.148 & +0.180 & -0.602 & -5.375 & --\\
 p1\_ns\_rhon0p7\_sy1\_d8\_n5k & +0.177 & \textbf{+0.154} & +0.148 & +0.185 & -0.453 & -5.449 & --\\
+p2\_independent\_senc0p1 & +0.000 & \textbf{+0.000} & +0.136 & -0.001 & -0.305 & -1.923 & --\\
+p2\_independent\_senc0p5 & +0.000 & \textbf{+0.000} & +0.141 & -- & -- & -- & --\\
 p2\_redundant\_senc0p1 & -2.079 & \textbf{-5.757} & -2.062 & -3.164 & -2.058 & -2.194 & --\\
 p2\_redundant\_senc0p5 & -0.730 & \textbf{-0.425} & -0.216 & -0.635 & -0.924 & -2.035 & --\\
 p2\_redundant\_senc1 & -0.065 & \textbf{-0.000} & +0.133 & -0.041 & -0.768 & -2.071 & --\\
 p2\_synergy1\_senc0p1 & +2.079 & \textbf{+2.252} & +2.067 & +2.806 & +0.824 & -2.034 & --\\
-p2\_synergy1\_senc0p5 & +0.733 & \textbf{+0.546} & +0.461 & +0.603 & -0.918 & -2.094 & --\\
+p2\_synergy1\_senc0p5 & +0.733 & \textbf{+0.546} & +0.461 & +0.608 & -0.918 & -2.094 & --\\
 p2\_synergy1\_senc1 & +0.067 & \textbf{-0.000} & +0.145 & -0.000 & -1.015 & -2.055 & --\\
-p2\_synergy2\_senc0p1 & +2.079 & \textbf{+0.000} & +0.719 & -- & +0.623 & -1.968 & --\\
+p2\_synergy2\_senc0p1 & +2.079 & \textbf{+0.000} & +0.719 & -0.001 & +0.623 & -1.968 & --\\
+p2\_synergy2\_senc0p5 & +0.424 & \textbf{-0.000} & +0.148 & -0.000 & -0.870 & -2.084 & --\\
+p2\_synergy2\_senc1 & +0.010 & \textbf{+0.000} & +0.146 & +0.000 & -0.748 & -2.064 & --\\
 p2\_unique\_senc0p1 & -0.000 & \textbf{-0.000} & +0.007 & +0.009 & -0.838 & -2.042 & --\\
 p2\_unique\_senc0p5 & -0.000 & \textbf{+0.000} & +0.140 & +0.005 & -1.128 & -2.075 & --\\
 p2\_unique\_senc1 & -0.000 & \textbf{+0.000} & +0.148 & +0.002 & -1.070 & -2.071 & --\\

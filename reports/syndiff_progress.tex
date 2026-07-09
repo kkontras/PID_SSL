@@ -3,8 +3,8 @@
 \usepackage{longtable}\usepackage{amsmath}\usepackage{amssymb}
 \begin{document}
 \begin{center}{\Large\textbf{SynDiff Synthetic Benchmark — Live Progress}}\\[4pt]
-2026-07-09 20:31:28 CEST\\[2pt]
-\textbf{345/942} jobs complete (36.6\%)\end{center}
+2026-07-09 21:01:33 CEST\\[2pt]
+\textbf{372/942} jobs complete (39.5\%)\end{center}
 \vspace{6pt}
 S $=$ I(X$_1$;Y$|$X$_2$) $-$ I(X$_1$;Y) in nats; S$>$0 synergy-dominant, S$<$0 redundancy-dominant. SynDiff (ours) vs prior estimators.
 \section*{Dataset construction}
@@ -21,11 +21,11 @@ Per-sample $\hat S=(1-10^{-3})\,\overline{\text{integrand}}_t$; the estimate is 
 \begin{tabular}{llrr}\toprule Phase & Method & Done & Expected\\\midrule
 P1 & batch\_pid & 0 & 96\\
 P1 & broja & 0 & 6\\
-P1 & infonce & 87 & 96\\
-P1 & minde\_comp & 83 & 96\\
-P1 & mine & 87 & 96\\
+P1 & infonce & 93 & 96\\
+P1 & minde\_comp & 90 & 96\\
+P1 & mine & 93 & 96\\
 P1 & plugin & 2 & 6\\
-P1 & syndiff & 86 & 96\\
+P1 & syndiff & 94 & 96\\
 P2 & batch\_pid & 0 & 90\\
 P2 & infonce & 0 & 90\\
 P2 & minde\_comp & 0 & 90\\
@@ -34,11 +34,11 @@ P2 & syndiff & 0 & 90\\
 \bottomrule\end{tabular}
 \section*{Accuracy vs ground truth (completed cells, lower error better)}
 \begin{tabular}{lrrr}\toprule Method & \#cells & mean $|$est$-$truth$|$ & sign acc\\\midrule
-minde\_comp & 28 & 0.0168 & 0.96\\
-\textbf{syndiff} & 29 & \textbf{0.0348} & 0.97\\
+minde\_comp & 31 & 0.0189 & 0.97\\
+\textbf{syndiff} & 32 & \textbf{0.0426} & 0.97\\
 plugin & 2 & 0.1343 & 1.00\\
-mine & 29 & 0.7708 & 0.55\\
-infonce & 29 & 5.6729 & 0.28\\
+mine & 31 & 0.7581 & 0.58\\
+infonce & 31 & 5.4950 & 0.32\\
 \bottomrule\end{tabular}
 \section*{SynDiff vs prior — head to head (nats)}
 \footnotesize\begin{longtable}{lrrrrrrr}\toprule Cell & truth & \textbf{SynDiff} & batch\_pid & minde\_comp & mine & infonce & plugin\\\midrule\endhead
@@ -60,9 +60,12 @@ p1\_dial\_rhon0p7\_sy0p1\_d8\_n20k & +1.896 & \textbf{+1.826} & -- & +1.853 & +0
 p1\_dial\_rhon0p7\_sy1\_d8\_n20k & +0.177 & \textbf{+0.158} & -- & +0.182 & -0.648 & -5.374 & --\\
 p1\_dial\_rhon0p9\_sy0p1\_d8\_n20k & +1.473 & \textbf{+1.412} & -- & +1.445 & +0.466 & -5.470 & --\\
 p1\_dial\_rhon0p9\_sy1\_d8\_n20k & +0.083 & \textbf{+0.054} & -- & +0.089 & -0.580 & -5.200 & --\\
-p1\_dim\_rhon0p7\_sy1\_d128\_n20k & +0.177 & \textbf{+0.022} & -- & -- & -1.938 & -6.143 & --\\
+p1\_dim\_rho0p7\_sy1\_d128\_n20k & -0.329 & \textbf{-0.012} & -- & -- & -- & -- & --\\
+p1\_dim\_rho0p7\_sy1\_d1\_n20k & -0.329 & \textbf{-0.329} & -- & -0.322 & -0.321 & -0.271 & -0.191\\
+p1\_dim\_rho0p7\_sy1\_d32\_n20k & -0.329 & \textbf{-0.365} & -- & -0.334 & -1.467 & -6.102 & --\\
+p1\_dim\_rhon0p7\_sy1\_d128\_n20k & +0.177 & \textbf{+0.022} & -- & +0.282 & -1.938 & -6.143 & --\\
 p1\_dim\_rhon0p7\_sy1\_d1\_n20k & +0.177 & \textbf{+0.168} & -- & +0.184 & +0.183 & +0.171 & +0.308\\
-p1\_dim\_rhon0p7\_sy1\_d32\_n20k & +0.177 & \textbf{+0.129} & -- & +0.179 & -1.085 & -6.105 & --\\
+p1\_dim\_rhon0p7\_sy1\_d32\_n20k & +0.177 & \textbf{+0.129} & -- & +0.177 & -1.085 & -6.105 & --\\
 p1\_ns\_rho0p7\_sy1\_d8\_n100k & -0.329 & \textbf{-0.332} & -- & -0.321 & -0.704 & -5.204 & --\\
 p1\_ns\_rho0p7\_sy1\_d8\_n1k & -0.329 & \textbf{-0.331} & -- & -0.325 & -0.630 & -5.217 & --\\
 p1\_ns\_rho0p7\_sy1\_d8\_n20k & -0.329 & \textbf{-0.333} & -- & -0.322 & -0.652 & -5.261 & --\\

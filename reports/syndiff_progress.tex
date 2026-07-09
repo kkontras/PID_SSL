@@ -1,0 +1,37 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}\usepackage{booktabs}\usepackage{xcolor}
+\usepackage{longtable}
+\begin{document}
+\begin{center}{\Large\textbf{SynDiff Synthetic Benchmark — Live Progress}}\\[4pt]
+2026-07-09 17:30:52 CEST\\[2pt]
+\textbf{13/942} jobs complete (1.4\%)\end{center}
+\vspace{6pt}
+S $=$ I(X$_1$;Y$|$X$_2$) $-$ I(X$_1$;Y) in nats; S$>$0 synergy-dominant, S$<$0 redundancy-dominant. SynDiff (ours) vs prior estimators.
+\section*{Sweep progress}
+\begin{tabular}{llrr}\toprule Phase & Method & Done & Expected\\\midrule
+P1 & batch\_pid & 0 & 96\\
+P1 & broja & 0 & 6\\
+P1 & infonce & 3 & 96\\
+P1 & minde\_comp & 0 & 96\\
+P1 & mine & 3 & 96\\
+P1 & plugin & 2 & 6\\
+P1 & syndiff & 5 & 96\\
+P2 & batch\_pid & 0 & 90\\
+P2 & infonce & 0 & 90\\
+P2 & minde\_comp & 0 & 90\\
+P2 & mine & 0 & 90\\
+P2 & syndiff & 0 & 90\\
+\bottomrule\end{tabular}
+\section*{Accuracy vs ground truth (completed cells, lower error better)}
+\begin{tabular}{lrrr}\toprule Method & \#cells & mean $|$est$-$truth$|$ & sign acc\\\midrule
+\textbf{syndiff} & 2 & \textbf{0.0435} & 1.00\\
+plugin & 2 & 0.1343 & 1.00\\
+mine & 1 & 1.0078 & 1.00\\
+infonce & 1 & 6.9437 & 0.00\\
+\bottomrule\end{tabular}
+\section*{SynDiff vs prior — head to head (nats)}
+\footnotesize\begin{longtable}{lrrrrrrr}\toprule Cell & truth & \textbf{SynDiff} & batch\_pid & minde\_comp & mine & infonce & plugin\\\midrule\endhead
+p1\_dial\_rhon0p9\_sy0p1\_d8\_n20k & +1.473 & \textbf{+1.412} & -- & -- & +0.466 & -5.470 & --\\
+p1\_dial\_rhon0p9\_sy1\_d8\_n20k & +0.083 & \textbf{+0.058} & -- & -- & -- & -- & --\\
+\bottomrule\end{longtable}
+\end{document}

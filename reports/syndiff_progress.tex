@@ -1,21 +1,31 @@
 \documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}\usepackage{booktabs}\usepackage{xcolor}
-\usepackage{longtable}
+\usepackage{longtable}\usepackage{amsmath}\usepackage{amssymb}
 \begin{document}
 \begin{center}{\Large\textbf{SynDiff Synthetic Benchmark — Live Progress}}\\[4pt]
-2026-07-09 20:01:25 CEST\\[2pt]
-\textbf{300/942} jobs complete (31.8\%)\end{center}
+2026-07-09 20:06:03 CEST\\[2pt]
+\textbf{311/942} jobs complete (33.0\%)\end{center}
 \vspace{6pt}
 S $=$ I(X$_1$;Y$|$X$_2$) $-$ I(X$_1$;Y) in nats; S$>$0 synergy-dominant, S$<$0 redundancy-dominant. SynDiff (ours) vs prior estimators.
+\section*{Dataset construction}
+\subsection*{Phase 1 --- Gaussian (closed-form ground truth)}
+Scalar base: $X_1,X_2\sim\mathcal N(0,1)$ with $\mathrm{corr}(X_1,X_2)=\rho$; label $Y=X_1+X_2+\sigma_y\varepsilon$, $\varepsilon\sim\mathcal N(0,1)$. Thus $\operatorname{Var}(Y)=2+2\rho+\sigma_y^2$ and $\operatorname{Cov}(X_i,Y)=1+\rho$. To lift to $d$ dimensions the informative scalar is padded with $d-1$ i.i.d.\ $\mathcal N(0,1)$ coordinates and rotated by a fixed per-seed orthogonal matrix $Q_i$ (one per variable). Rotation and independent padding preserve mutual information, so $S$ is unchanged and the closed form carries over. Ground truth is computed from the $3\times3$ covariance via $I=\tfrac12\log\!\big(\det\Sigma_A\det\Sigma_B/\det\Sigma_{AB}\big)$ and the analogous conditional form. Cells sweep $\rho\in\{-.9,\dots,.9\}$, $\sigma_y\in\{.1,1\}$, $n\in\{1\text{k},\dots,100\text{k}\}$, $d\in\{1,8,32,128\}$.
+\subsection*{Phase 2 --- discrete U/R/S (mixture-density MC truth)}
+Latent sources $s_1,s_2,s_3\sim\mathrm{Unif}\{0,\dots,Q-1\}$ with $Q=8$. Encodings $X_i=W_i\,\mathrm{onehot}(s_i)+\sigma_{\mathrm{enc}}\,\mathcal N(0,I_{32})$ with orthonormal $W_i\in\mathbb R^{32\times8}$ frozen per seed. Regimes (X$_1$ always encodes $s_1$): \textbf{UNIQUE} $Y{=}s_1$; \textbf{REDUNDANT} $Y{=}s_1$ and X$_2$ also encodes $s_1$; \textbf{SYNERGY1} $Y{=}(s_1{+}s_2)\bmod Q$ with X$_2\!\sim\!s_2$; \textbf{SYNERGY2} $Y{=}(s_3{+}(s_1{+}s_2)\bmod Q)\bmod Q$ with X$_2{=}[\mathrm{enc}(s_2)\,|\,\mathrm{enc}(s_3)]\in\mathbb R^{64}$; \textbf{INDEPENDENT} $Y{=}s_3$. The $\lambda$-dial mixes the SYNERGY1 and REDUNDANT rules per sample (Bernoulli($\lambda$)). Ground truth is the exact $S=I(X_1;X_2,Y)-I(X_1;X_2)-I(X_1;Y)$ obtained by Monte Carlo over the enumerable Gaussian-mixture components (matches the discrete limit as $\sigma_{\mathrm{enc}}\!\to\!0$: $\pm\log Q$ for pure synergy/redundancy, $0$ for unique/independent).
+\section*{Method: SynDiff}
+Target $S=I(X_1;Y\mid X_2)-I(X_1;Y)$ in nats. By the symmetry of interaction information this equals $I(X_1;X_2\mid Y)-I(X_1;X_2)$, which the four-mask form below estimates directly. \textbf{VP schedule:} $\beta(t)=0.1+19.9t$, $B(t)=\int_0^t\!\beta=0.1t+9.95t^2$, signal $k(t)=e^{-B/2}$, noise $\sigma^2(t)=1-e^{-B}$, weight $w(t)=\beta(t)/(2\sigma^2(t))$. A single noise-prediction network $\hat\varepsilon(x_{1,t},t,\mathrm{cond})$ (\emph{MaskedCondMLP}: Fourier-$t$ features $\oplus$ per-slot conditioning embeddings each with a learned NULL token; $4\times512$ SiLU) is trained to denoise $X_1$ while each conditioning slot (X$_2$, $Y$) is independently dropped to its NULL token with probability $0.15$. EMA weights (decay $0.999$) are used at evaluation.
+\textbf{Four-mask estimator.} Per evaluation triple and per stratified time $t$ ($K{=}16$ strata on $[10^{-3},1]$) with \emph{one shared} noise draw $\varepsilon$ and $x_{1,t}=k(t)x_1+\sigma(t)\varepsilon$:
+\begin{align*}e_1&=\hat\varepsilon(x_{1,t},t,x_2,y), & e_2&=\hat\varepsilon(x_{1,t},t,\varnothing,y),\\e_3&=\hat\varepsilon(x_{1,t},t,x_2,\varnothing), & e_4&=\hat\varepsilon(x_{1,t},t,\varnothing,\varnothing),\\\text{integrand}(t)&=w(t)\big(\|e_1-e_2\|^2-\|e_3-e_4\|^2\big).&&\end{align*}
+Per-sample $\hat S=(1-10^{-3})\,\overline{\text{integrand}}_t$; the estimate is the mean over $10^4$ fresh triples with a 1000-sample bootstrap CI (norms in fp32, no-grad, EMA weights). \textbf{Baselines:} \emph{minde\_comp} (three separately trained MINDE MI terms composed as above), \emph{MINE} and \emph{InfoNCE} (lower-bound MI, same composition), \emph{batch\_pid} (Liang et al.\ CVX PID, k-means $k{=}20$ then max-entropy solve), and \emph{broja}/\emph{plugin} on $d{=}1$.
 \section*{Sweep progress}
 \begin{tabular}{llrr}\toprule Phase & Method & Done & Expected\\\midrule
 P1 & batch\_pid & 0 & 96\\
 P1 & broja & 0 & 6\\
-P1 & infonce & 75 & 96\\
-P1 & minde\_comp & 72 & 96\\
-P1 & mine & 75 & 96\\
+P1 & infonce & 78 & 96\\
+P1 & minde\_comp & 75 & 96\\
+P1 & mine & 78 & 96\\
 P1 & plugin & 2 & 6\\
-P1 & syndiff & 76 & 96\\
+P1 & syndiff & 78 & 96\\
 P2 & batch\_pid & 0 & 90\\
 P2 & infonce & 0 & 90\\
 P2 & minde\_comp & 0 & 90\\
@@ -24,11 +34,11 @@ P2 & syndiff & 0 & 90\\
 \bottomrule\end{tabular}
 \section*{Accuracy vs ground truth (completed cells, lower error better)}
 \begin{tabular}{lrrr}\toprule Method & \#cells & mean $|$est$-$truth$|$ & sign acc\\\midrule
-minde\_comp & 25 & 0.0180 & 0.96\\
+minde\_comp & 26 & 0.0175 & 0.96\\
 \textbf{syndiff} & 26 & \textbf{0.0307} & 0.96\\
 plugin & 2 & 0.1343 & 1.00\\
-mine & 25 & 0.7438 & 0.56\\
-infonce & 25 & 5.8812 & 0.24\\
+mine & 26 & 0.7296 & 0.58\\
+infonce & 26 & 5.8425 & 0.27\\
 \bottomrule\end{tabular}
 \section*{SynDiff vs prior — head to head (nats)}
 \footnotesize\begin{longtable}{lrrrrrrr}\toprule Cell & truth & \textbf{SynDiff} & batch\_pid & minde\_comp & mine & infonce & plugin\\\midrule\endhead
@@ -50,9 +60,9 @@ p1\_dial\_rhon0p7\_sy0p1\_d8\_n20k & +1.896 & \textbf{+1.826} & -- & +1.853 & +0
 p1\_dial\_rhon0p7\_sy1\_d8\_n20k & +0.177 & \textbf{+0.158} & -- & +0.182 & -0.648 & -5.374 & --\\
 p1\_dial\_rhon0p9\_sy0p1\_d8\_n20k & +1.473 & \textbf{+1.412} & -- & +1.445 & +0.466 & -5.470 & --\\
 p1\_dial\_rhon0p9\_sy1\_d8\_n20k & +0.083 & \textbf{+0.054} & -- & +0.089 & -0.580 & -5.200 & --\\
-p1\_ns\_rho0p7\_sy1\_d8\_n100k & -0.329 & \textbf{-0.332} & -- & -- & -- & -- & --\\
+p1\_ns\_rho0p7\_sy1\_d8\_n100k & -0.329 & \textbf{-0.332} & -- & -0.325 & -0.704 & -5.204 & --\\
 p1\_ns\_rho0p7\_sy1\_d8\_n1k & -0.329 & \textbf{-0.331} & -- & -0.325 & -0.630 & -5.217 & --\\
-p1\_ns\_rho0p7\_sy1\_d8\_n20k & -0.329 & \textbf{-0.333} & -- & -0.324 & -0.652 & -5.261 & --\\
+p1\_ns\_rho0p7\_sy1\_d8\_n20k & -0.329 & \textbf{-0.333} & -- & -0.322 & -0.652 & -5.261 & --\\
 p1\_ns\_rho0p7\_sy1\_d8\_n5k & -0.329 & \textbf{-0.331} & -- & -0.324 & -0.651 & -5.174 & --\\
 p1\_ns\_rhon0p7\_sy1\_d8\_n100k & +0.177 & \textbf{+0.157} & -- & +0.180 & -0.648 & -5.374 & --\\
 p1\_ns\_rhon0p7\_sy1\_d8\_n1k & +0.177 & \textbf{+0.160} & -- & +0.183 & -0.497 & -5.338 & --\\

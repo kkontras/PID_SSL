@@ -3,8 +3,8 @@
 \usepackage{longtable}\usepackage{amsmath}\usepackage{amssymb}
 \begin{document}
 \begin{center}{\Large\textbf{SynDiff Synthetic Benchmark — Live Progress}}\\[4pt]
-2026-07-10 00:32:06 CEST\\[2pt]
-\textbf{756/942} jobs complete (80.3\%)\end{center}
+2026-07-10 01:02:10 CEST\\[2pt]
+\textbf{810/942} jobs complete (86.0\%)\end{center}
 \vspace{6pt}
 S $=$ I(X$_1$;Y$|$X$_2$) $-$ I(X$_1$;Y) in nats; S$>$0 synergy-dominant, S$<$0 redundancy-dominant. SynDiff (ours) vs prior estimators.
 \section*{Dataset construction}
@@ -19,7 +19,7 @@ Target $S=I(X_1;Y\mid X_2)-I(X_1;Y)$ in nats. By the symmetry of interaction inf
 Per-sample $\hat S=(1-10^{-3})\,\overline{\text{integrand}}_t$; the estimate is the mean over $10^4$ fresh triples with a 1000-sample bootstrap CI (norms in fp32, no-grad, EMA weights). \textbf{Baselines:} \emph{minde\_comp} (three separately trained MINDE MI terms composed as above), \emph{MINE} and \emph{InfoNCE} (lower-bound MI, same composition), \emph{batch\_pid} (Liang et al.\ CVX PID, k-means $k{=}20$ then max-entropy solve), and \emph{broja}/\emph{plugin} on $d{=}1$.
 \section*{Sweep progress}
 \begin{tabular}{llrr}\toprule Phase & Method & Done & Expected\\\midrule
-P1 & batch\_pid & 32 & 96\\
+P1 & batch\_pid & 38 & 96\\
 P1 & broja & 0 & 6\\
 P1 & infonce & \color{green!50!black}96 & 96\\
 P1 & minde\_comp & \color{green!50!black}96 & 96\\
@@ -27,19 +27,19 @@ P1 & mine & \color{green!50!black}96 & 96\\
 P1 & plugin & 2 & 6\\
 P1 & syndiff & \color{green!50!black}96 & 96\\
 P2 & batch\_pid & 30 & 90\\
-P2 & infonce & 78 & 90\\
-P2 & minde\_comp & 74 & 90\\
-P2 & mine & 78 & 90\\
-P2 & syndiff & 78 & 90\\
+P2 & infonce & \color{green!50!black}90 & 90\\
+P2 & minde\_comp & 86 & 90\\
+P2 & mine & \color{green!50!black}90 & 90\\
+P2 & syndiff & \color{green!50!black}90 & 90\\
 \bottomrule\end{tabular}
 \section*{Accuracy vs ground truth (completed cells, lower error better)}
 \begin{tabular}{lrrr}\toprule Method & \#cells & mean $|$est$-$truth$|$ & sign acc\\\midrule
 plugin & 2 & 0.1343 & 1.00\\
-minde\_comp & 57 & 0.1347 & 0.81\\
-\textbf{syndiff} & 58 & \textbf{0.2350} & 0.88\\
+minde\_comp & 62 & 0.1417 & 0.81\\
+\textbf{syndiff} & 62 & \textbf{0.2277} & 0.89\\
 batch\_pid & 62 & 0.3669 & 0.74\\
-mine & 58 & 0.7962 & 0.60\\
-infonce & 58 & 4.0098 & 0.40\\
+mine & 62 & 0.8132 & 0.58\\
+infonce & 62 & 3.9327 & 0.37\\
 \bottomrule\end{tabular}
 \section*{SynDiff vs prior — head to head (nats)}
 \footnotesize\begin{longtable}{lrrrrrrr}\toprule Cell & truth & \textbf{SynDiff} & batch\_pid & minde\_comp & mine & infonce & plugin\\\midrule\endhead
@@ -57,10 +57,10 @@ p1\_dial\_rhon0p3\_sy0p1\_d8\_n20k & +2.047 & \textbf{+1.976} & +0.161 & +2.017 
 p1\_dial\_rhon0p3\_sy1\_d8\_n20k & +0.209 & \textbf{+0.199} & +0.157 & +0.210 & -0.562 & -5.363 & --\\
 p1\_dial\_rhon0p5\_sy0p1\_d8\_n20k & +2.023 & \textbf{+1.953} & +0.149 & +1.980 & +0.795 & -5.507 & --\\
 p1\_dial\_rhon0p5\_sy1\_d8\_n20k & +0.213 & \textbf{+0.197} & +0.153 & +0.214 & -0.504 & -5.342 & --\\
-p1\_dial\_rhon0p7\_sy0p1\_d8\_n20k & +1.896 & \textbf{+1.826} & +0.138 & +1.853 & +0.689 & -5.488 & --\\
+p1\_dial\_rhon0p7\_sy0p1\_d8\_n20k & +1.896 & \textbf{+1.826} & +0.136 & +1.853 & +0.689 & -5.488 & --\\
 p1\_dial\_rhon0p7\_sy1\_d8\_n20k & +0.177 & \textbf{+0.158} & +0.148 & +0.182 & -0.648 & -5.374 & --\\
-p1\_dial\_rhon0p9\_sy0p1\_d8\_n20k & +1.473 & \textbf{+1.412} & +0.142 & +1.445 & +0.466 & -5.470 & --\\
-p1\_dial\_rhon0p9\_sy1\_d8\_n20k & +0.083 & \textbf{+0.054} & +0.142 & +0.089 & -0.580 & -5.200 & --\\
+p1\_dial\_rhon0p9\_sy0p1\_d8\_n20k & +1.473 & \textbf{+1.412} & +0.140 & +1.445 & +0.466 & -5.470 & --\\
+p1\_dial\_rhon0p9\_sy1\_d8\_n20k & +0.083 & \textbf{+0.054} & +0.143 & +0.089 & -0.580 & -5.200 & --\\
 p1\_dim\_rho0p7\_sy1\_d128\_n20k & -0.329 & \textbf{-0.050} & +0.135 & -0.295 & -1.852 & -6.133 & --\\
 p1\_dim\_rho0p7\_sy1\_d1\_n20k & -0.329 & \textbf{-0.329} & -0.240 & -0.322 & -0.321 & -0.271 & -0.191\\
 p1\_dim\_rho0p7\_sy1\_d32\_n20k & -0.329 & \textbf{-0.365} & +0.133 & -0.330 & -1.467 & -6.102 & --\\
@@ -87,8 +87,12 @@ p2\_lambda0p25\_senc1 & -0.016 & \textbf{+0.001} & +0.142 & -0.018 & -0.780 & -2
 p2\_lambda0p5\_senc0p1 & +0.814 & \textbf{+1.008} & +0.792 & +1.347 & +0.138 & -2.142 & --\\
 p2\_lambda0p5\_senc0p5 & +0.272 & \textbf{+0.069} & +0.238 & +0.102 & -0.554 & -2.075 & --\\
 p2\_lambda0p5\_senc1 & +0.024 & \textbf{+0.004} & +0.142 & +0.004 & -0.953 & -2.079 & --\\
-p2\_lambda0p75\_senc0p1 & +1.583 & \textbf{+1.720} & +1.557 & +2.072 & +0.630 & -2.063 & --\\
-p2\_lambda0p75\_senc0p5 & +0.545 & \textbf{+0.333} & +0.364 & -- & -0.817 & -2.090 & --\\
+p2\_lambda0p75\_senc0p1 & +1.583 & \textbf{+1.720} & +1.557 & +2.062 & +0.630 & -2.063 & --\\
+p2\_lambda0p75\_senc0p5 & +0.545 & \textbf{+0.333} & +0.364 & +0.391 & -0.817 & -2.090 & --\\
+p2\_lambda0p75\_senc1 & +0.048 & \textbf{+0.004} & +0.144 & +0.011 & -0.524 & -2.058 & --\\
+p2\_lambda1\_senc0p1 & +2.079 & \textbf{+2.284} & +2.066 & +2.819 & +0.830 & -2.160 & --\\
+p2\_lambda1\_senc0p5 & +0.733 & \textbf{+0.560} & +0.481 & +0.612 & -0.820 & -2.016 & --\\
+p2\_lambda1\_senc1 & +0.067 & \textbf{+0.000} & +0.146 & -0.001 & -0.796 & -2.101 & --\\
 p2\_redundant\_senc0p1 & -2.079 & \textbf{-5.757} & -2.062 & -3.164 & -2.058 & -2.194 & --\\
 p2\_redundant\_senc0p5 & -0.730 & \textbf{-0.425} & -0.216 & -0.635 & -0.924 & -2.035 & --\\
 p2\_redundant\_senc1 & -0.065 & \textbf{-0.000} & +0.133 & -0.041 & -0.768 & -2.071 & --\\
@@ -99,7 +103,5 @@ p2\_synergy2\_senc0p1 & +2.079 & \textbf{+0.000} & +0.719 & -0.001 & +0.623 & -1
 p2\_synergy2\_senc0p5 & +0.424 & \textbf{-0.000} & +0.148 & -0.000 & -0.870 & -2.084 & --\\
 p2\_synergy2\_senc1 & +0.010 & \textbf{+0.000} & +0.146 & +0.000 & -0.748 & -2.064 & --\\
 p2\_unique\_senc0p1 & -0.000 & \textbf{-0.000} & +0.007 & +0.009 & -0.838 & -2.042 & --\\
-p2\_unique\_senc0p5 & -0.000 & \textbf{+0.000} & +0.140 & +0.005 & -1.128 & -2.075 & --\\
-p2\_unique\_senc1 & -0.000 & \textbf{+0.000} & +0.148 & +0.002 & -1.070 & -2.071 & --\\
 \bottomrule\end{longtable}
 \end{document}

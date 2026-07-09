@@ -3,8 +3,8 @@
 \usepackage{longtable}\usepackage{amsmath}\usepackage{amssymb}
 \begin{document}
 \begin{center}{\Large\textbf{SynDiff Synthetic Benchmark — Live Progress}}\\[4pt]
-2026-07-10 01:32:16 CEST\\[2pt]
-\textbf{940/942} jobs complete (99.8\%)\end{center}
+2026-07-10 01:51:15 CEST\\[2pt]
+\textbf{942/942} jobs complete (100.0\%)\end{center}
 \vspace{6pt}
 S $=$ I(X$_1$;Y$|$X$_2$) $-$ I(X$_1$;Y) in nats; S$>$0 synergy-dominant, S$<$0 redundancy-dominant. SynDiff (ours) vs prior estimators.
 \section*{Dataset construction}
@@ -20,7 +20,7 @@ Per-sample $\hat S=(1-10^{-3})\,\overline{\text{integrand}}_t$; the estimate is 
 \section*{Sweep progress}
 \begin{tabular}{llrr}\toprule Phase & Method & Done & Expected\\\midrule
 P1 & batch\_pid & \color{green!50!black}96 & 96\\
-P1 & broja & 4 & 6\\
+P1 & broja & \color{green!50!black}6 & 6\\
 P1 & infonce & \color{green!50!black}96 & 96\\
 P1 & minde\_comp & \color{green!50!black}96 & 96\\
 P1 & mine & \color{green!50!black}96 & 96\\
@@ -34,7 +34,7 @@ P2 & syndiff & \color{green!50!black}90 & 90\\
 \bottomrule\end{tabular}
 \section*{Accuracy vs ground truth (completed cells, lower error better)}
 \begin{tabular}{lrrr}\toprule Method & \#cells & mean $|$est$-$truth$|$ & sign acc\\\midrule
-broja & 2 & 0.0661 & 1.00\\
+broja & 2 & 0.0680 & 1.00\\
 plugin & 2 & 0.1301 & 1.00\\
 minde\_comp & 62 & 0.1419 & 0.81\\
 \textbf{syndiff} & 62 & \textbf{0.2277} & 0.89\\

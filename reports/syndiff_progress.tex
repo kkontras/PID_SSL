@@ -3,19 +3,19 @@
 \usepackage{longtable}
 \begin{document}
 \begin{center}{\Large\textbf{SynDiff Synthetic Benchmark — Live Progress}}\\[4pt]
-2026-07-09 19:31:22 CEST\\[2pt]
-\textbf{242/942} jobs complete (25.7\%)\end{center}
+2026-07-09 20:01:25 CEST\\[2pt]
+\textbf{300/942} jobs complete (31.8\%)\end{center}
 \vspace{6pt}
 S $=$ I(X$_1$;Y$|$X$_2$) $-$ I(X$_1$;Y) in nats; S$>$0 synergy-dominant, S$<$0 redundancy-dominant. SynDiff (ours) vs prior estimators.
 \section*{Sweep progress}
 \begin{tabular}{llrr}\toprule Phase & Method & Done & Expected\\\midrule
 P1 & batch\_pid & 0 & 96\\
 P1 & broja & 0 & 6\\
-P1 & infonce & 60 & 96\\
-P1 & minde\_comp & 58 & 96\\
-P1 & mine & 60 & 96\\
+P1 & infonce & 75 & 96\\
+P1 & minde\_comp & 72 & 96\\
+P1 & mine & 75 & 96\\
 P1 & plugin & 2 & 6\\
-P1 & syndiff & 62 & 96\\
+P1 & syndiff & 76 & 96\\
 P2 & batch\_pid & 0 & 90\\
 P2 & infonce & 0 & 90\\
 P2 & minde\_comp & 0 & 90\\
@@ -24,11 +24,11 @@ P2 & syndiff & 0 & 90\\
 \bottomrule\end{tabular}
 \section*{Accuracy vs ground truth (completed cells, lower error better)}
 \begin{tabular}{lrrr}\toprule Method & \#cells & mean $|$est$-$truth$|$ & sign acc\\\midrule
-minde\_comp & 20 & 0.0218 & 0.95\\
-\textbf{syndiff} & 21 & \textbf{0.0363} & 0.95\\
+minde\_comp & 25 & 0.0180 & 0.96\\
+\textbf{syndiff} & 26 & \textbf{0.0307} & 0.96\\
 plugin & 2 & 0.1343 & 1.00\\
-mine & 20 & 0.8022 & 0.55\\
-infonce & 20 & 6.0630 & 0.15\\
+mine & 25 & 0.7438 & 0.56\\
+infonce & 25 & 5.8812 & 0.24\\
 \bottomrule\end{tabular}
 \section*{SynDiff vs prior — head to head (nats)}
 \footnotesize\begin{longtable}{lrrrrrrr}\toprule Cell & truth & \textbf{SynDiff} & batch\_pid & minde\_comp & mine & infonce & plugin\\\midrule\endhead
@@ -50,8 +50,13 @@ p1\_dial\_rhon0p7\_sy0p1\_d8\_n20k & +1.896 & \textbf{+1.826} & -- & +1.853 & +0
 p1\_dial\_rhon0p7\_sy1\_d8\_n20k & +0.177 & \textbf{+0.158} & -- & +0.182 & -0.648 & -5.374 & --\\
 p1\_dial\_rhon0p9\_sy0p1\_d8\_n20k & +1.473 & \textbf{+1.412} & -- & +1.445 & +0.466 & -5.470 & --\\
 p1\_dial\_rhon0p9\_sy1\_d8\_n20k & +0.083 & \textbf{+0.054} & -- & +0.089 & -0.580 & -5.200 & --\\
-p1\_ns\_rhon0p7\_sy1\_d8\_n1k & +0.177 & \textbf{+0.160} & -- & +0.187 & -0.497 & -5.338 & --\\
-p1\_ns\_rhon0p7\_sy1\_d8\_n20k & +0.177 & \textbf{+0.157} & -- & -- & -- & -- & --\\
+p1\_ns\_rho0p7\_sy1\_d8\_n100k & -0.329 & \textbf{-0.332} & -- & -- & -- & -- & --\\
+p1\_ns\_rho0p7\_sy1\_d8\_n1k & -0.329 & \textbf{-0.331} & -- & -0.325 & -0.630 & -5.217 & --\\
+p1\_ns\_rho0p7\_sy1\_d8\_n20k & -0.329 & \textbf{-0.333} & -- & -0.324 & -0.652 & -5.261 & --\\
+p1\_ns\_rho0p7\_sy1\_d8\_n5k & -0.329 & \textbf{-0.331} & -- & -0.324 & -0.651 & -5.174 & --\\
+p1\_ns\_rhon0p7\_sy1\_d8\_n100k & +0.177 & \textbf{+0.157} & -- & +0.180 & -0.648 & -5.374 & --\\
+p1\_ns\_rhon0p7\_sy1\_d8\_n1k & +0.177 & \textbf{+0.160} & -- & +0.183 & -0.497 & -5.338 & --\\
+p1\_ns\_rhon0p7\_sy1\_d8\_n20k & +0.177 & \textbf{+0.154} & -- & +0.180 & -0.602 & -5.375 & --\\
 p1\_ns\_rhon0p7\_sy1\_d8\_n5k & +0.177 & \textbf{+0.154} & -- & +0.185 & -0.453 & -5.449 & --\\
 \bottomrule\end{longtable}
 \end{document}

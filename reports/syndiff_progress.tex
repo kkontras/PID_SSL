@@ -3,8 +3,8 @@
 \usepackage{longtable}\usepackage{amsmath}\usepackage{amssymb}
 \begin{document}
 \begin{center}{\Large\textbf{SynDiff Synthetic Benchmark — Live Progress}}\\[4pt]
-2026-07-10 01:02:10 CEST\\[2pt]
-\textbf{810/942} jobs complete (86.0\%)\end{center}
+2026-07-10 01:32:16 CEST\\[2pt]
+\textbf{940/942} jobs complete (99.8\%)\end{center}
 \vspace{6pt}
 S $=$ I(X$_1$;Y$|$X$_2$) $-$ I(X$_1$;Y) in nats; S$>$0 synergy-dominant, S$<$0 redundancy-dominant. SynDiff (ours) vs prior estimators.
 \section*{Dataset construction}
@@ -19,89 +19,90 @@ Target $S=I(X_1;Y\mid X_2)-I(X_1;Y)$ in nats. By the symmetry of interaction inf
 Per-sample $\hat S=(1-10^{-3})\,\overline{\text{integrand}}_t$; the estimate is the mean over $10^4$ fresh triples with a 1000-sample bootstrap CI (norms in fp32, no-grad, EMA weights). \textbf{Baselines:} \emph{minde\_comp} (three separately trained MINDE MI terms composed as above), \emph{MINE} and \emph{InfoNCE} (lower-bound MI, same composition), \emph{batch\_pid} (Liang et al.\ CVX PID, k-means $k{=}20$ then max-entropy solve), and \emph{broja}/\emph{plugin} on $d{=}1$.
 \section*{Sweep progress}
 \begin{tabular}{llrr}\toprule Phase & Method & Done & Expected\\\midrule
-P1 & batch\_pid & 38 & 96\\
-P1 & broja & 0 & 6\\
+P1 & batch\_pid & \color{green!50!black}96 & 96\\
+P1 & broja & 4 & 6\\
 P1 & infonce & \color{green!50!black}96 & 96\\
 P1 & minde\_comp & \color{green!50!black}96 & 96\\
 P1 & mine & \color{green!50!black}96 & 96\\
-P1 & plugin & 2 & 6\\
+P1 & plugin & \color{green!50!black}6 & 6\\
 P1 & syndiff & \color{green!50!black}96 & 96\\
-P2 & batch\_pid & 30 & 90\\
+P2 & batch\_pid & \color{green!50!black}90 & 90\\
 P2 & infonce & \color{green!50!black}90 & 90\\
-P2 & minde\_comp & 86 & 90\\
+P2 & minde\_comp & \color{green!50!black}90 & 90\\
 P2 & mine & \color{green!50!black}90 & 90\\
 P2 & syndiff & \color{green!50!black}90 & 90\\
 \bottomrule\end{tabular}
 \section*{Accuracy vs ground truth (completed cells, lower error better)}
 \begin{tabular}{lrrr}\toprule Method & \#cells & mean $|$est$-$truth$|$ & sign acc\\\midrule
-plugin & 2 & 0.1343 & 1.00\\
-minde\_comp & 62 & 0.1417 & 0.81\\
+broja & 2 & 0.0661 & 1.00\\
+plugin & 2 & 0.1301 & 1.00\\
+minde\_comp & 62 & 0.1419 & 0.81\\
 \textbf{syndiff} & 62 & \textbf{0.2277} & 0.89\\
-batch\_pid & 62 & 0.3669 & 0.74\\
+batch\_pid & 62 & 0.3660 & 0.74\\
 mine & 62 & 0.8132 & 0.58\\
 infonce & 62 & 3.9327 & 0.37\\
 \bottomrule\end{tabular}
 \section*{SynDiff vs prior — head to head (nats)}
 \footnotesize\begin{longtable}{lrrrrrrr}\toprule Cell & truth & \textbf{SynDiff} & batch\_pid & minde\_comp & mine & infonce & plugin\\\midrule\endhead
 p1\_dial\_rho0\_sy0p1\_d8\_n20k & +1.963 & \textbf{+1.887} & +0.147 & +1.922 & +0.631 & -5.604 & --\\
-p1\_dial\_rho0\_sy1\_d8\_n20k & +0.144 & \textbf{+0.136} & +0.154 & +0.145 & -0.555 & -5.315 & --\\
-p1\_dial\_rho0p3\_sy0p1\_d8\_n20k & +1.740 & \textbf{+1.677} & +0.128 & +1.678 & +0.627 & -5.460 & --\\
-p1\_dial\_rho0p3\_sy1\_d8\_n20k & +0.007 & \textbf{+0.006} & +0.129 & +0.010 & -0.603 & -5.429 & --\\
-p1\_dial\_rho0p5\_sy0p1\_d8\_n20k & +1.477 & \textbf{+1.407} & +0.115 & +1.434 & +0.525 & -5.436 & --\\
-p1\_dial\_rho0p5\_sy1\_d8\_n20k & -0.134 & \textbf{-0.134} & +0.108 & -0.128 & -0.829 & -5.254 & --\\
-p1\_dial\_rho0p7\_sy0p1\_d8\_n20k & +1.035 & \textbf{+0.971} & +0.090 & +0.991 & +0.309 & -5.395 & --\\
-p1\_dial\_rho0p7\_sy1\_d8\_n20k & -0.329 & \textbf{-0.334} & +0.098 & -0.321 & -0.651 & -5.190 & --\\
-p1\_dial\_rho0p9\_sy0p1\_d8\_n20k & +0.024 & \textbf{-0.032} & +0.055 & -0.025 & -0.329 & -5.321 & --\\
-p1\_dial\_rho0p9\_sy1\_d8\_n20k & -0.610 & \textbf{-0.601} & +0.066 & -0.612 & -0.807 & -5.145 & --\\
-p1\_dial\_rhon0p3\_sy0p1\_d8\_n20k & +2.047 & \textbf{+1.976} & +0.161 & +2.017 & +0.724 & -5.385 & --\\
-p1\_dial\_rhon0p3\_sy1\_d8\_n20k & +0.209 & \textbf{+0.199} & +0.157 & +0.210 & -0.562 & -5.363 & --\\
-p1\_dial\_rhon0p5\_sy0p1\_d8\_n20k & +2.023 & \textbf{+1.953} & +0.149 & +1.980 & +0.795 & -5.507 & --\\
-p1\_dial\_rhon0p5\_sy1\_d8\_n20k & +0.213 & \textbf{+0.197} & +0.153 & +0.214 & -0.504 & -5.342 & --\\
+p1\_dial\_rho0\_sy1\_d8\_n20k & +0.144 & \textbf{+0.136} & +0.151 & +0.145 & -0.555 & -5.315 & --\\
+p1\_dial\_rho0p3\_sy0p1\_d8\_n20k & +1.740 & \textbf{+1.677} & +0.130 & +1.678 & +0.627 & -5.460 & --\\
+p1\_dial\_rho0p3\_sy1\_d8\_n20k & +0.007 & \textbf{+0.006} & +0.128 & +0.010 & -0.603 & -5.429 & --\\
+p1\_dial\_rho0p5\_sy0p1\_d8\_n20k & +1.477 & \textbf{+1.407} & +0.111 & +1.434 & +0.525 & -5.436 & --\\
+p1\_dial\_rho0p5\_sy1\_d8\_n20k & -0.134 & \textbf{-0.134} & +0.111 & -0.128 & -0.829 & -5.254 & --\\
+p1\_dial\_rho0p7\_sy0p1\_d8\_n20k & +1.035 & \textbf{+0.971} & +0.080 & +0.991 & +0.309 & -5.395 & --\\
+p1\_dial\_rho0p7\_sy1\_d8\_n20k & -0.329 & \textbf{-0.334} & +0.088 & -0.321 & -0.651 & -5.190 & --\\
+p1\_dial\_rho0p9\_sy0p1\_d8\_n20k & +0.024 & \textbf{-0.032} & +0.048 & -0.025 & -0.329 & -5.321 & --\\
+p1\_dial\_rho0p9\_sy1\_d8\_n20k & -0.610 & \textbf{-0.601} & +0.062 & -0.612 & -0.807 & -5.145 & --\\
+p1\_dial\_rhon0p3\_sy0p1\_d8\_n20k & +2.047 & \textbf{+1.976} & +0.156 & +2.017 & +0.724 & -5.385 & --\\
+p1\_dial\_rhon0p3\_sy1\_d8\_n20k & +0.209 & \textbf{+0.199} & +0.156 & +0.210 & -0.562 & -5.363 & --\\
+p1\_dial\_rhon0p5\_sy0p1\_d8\_n20k & +2.023 & \textbf{+1.953} & +0.151 & +1.980 & +0.795 & -5.507 & --\\
+p1\_dial\_rhon0p5\_sy1\_d8\_n20k & +0.213 & \textbf{+0.197} & +0.152 & +0.214 & -0.504 & -5.342 & --\\
 p1\_dial\_rhon0p7\_sy0p1\_d8\_n20k & +1.896 & \textbf{+1.826} & +0.136 & +1.853 & +0.689 & -5.488 & --\\
-p1\_dial\_rhon0p7\_sy1\_d8\_n20k & +0.177 & \textbf{+0.158} & +0.148 & +0.182 & -0.648 & -5.374 & --\\
+p1\_dial\_rhon0p7\_sy1\_d8\_n20k & +0.177 & \textbf{+0.158} & +0.149 & +0.182 & -0.648 & -5.374 & --\\
 p1\_dial\_rhon0p9\_sy0p1\_d8\_n20k & +1.473 & \textbf{+1.412} & +0.140 & +1.445 & +0.466 & -5.470 & --\\
 p1\_dial\_rhon0p9\_sy1\_d8\_n20k & +0.083 & \textbf{+0.054} & +0.143 & +0.089 & -0.580 & -5.200 & --\\
-p1\_dim\_rho0p7\_sy1\_d128\_n20k & -0.329 & \textbf{-0.050} & +0.135 & -0.295 & -1.852 & -6.133 & --\\
-p1\_dim\_rho0p7\_sy1\_d1\_n20k & -0.329 & \textbf{-0.329} & -0.240 & -0.322 & -0.321 & -0.271 & -0.191\\
-p1\_dim\_rho0p7\_sy1\_d32\_n20k & -0.329 & \textbf{-0.365} & +0.133 & -0.330 & -1.467 & -6.102 & --\\
-p1\_dim\_rhon0p7\_sy1\_d128\_n20k & +0.177 & \textbf{+0.022} & +0.136 & +0.271 & -1.938 & -6.143 & --\\
-p1\_dim\_rhon0p7\_sy1\_d1\_n20k & +0.177 & \textbf{+0.168} & +0.239 & +0.184 & +0.183 & +0.171 & +0.308\\
-p1\_dim\_rhon0p7\_sy1\_d32\_n20k & +0.177 & \textbf{+0.129} & +0.137 & +0.177 & -1.085 & -6.105 & --\\
-p1\_ns\_rho0p7\_sy1\_d8\_n100k & -0.329 & \textbf{-0.332} & +0.098 & -0.321 & -0.704 & -5.204 & --\\
-p1\_ns\_rho0p7\_sy1\_d8\_n1k & -0.329 & \textbf{-0.331} & +0.098 & -0.325 & -0.630 & -5.217 & --\\
-p1\_ns\_rho0p7\_sy1\_d8\_n20k & -0.329 & \textbf{-0.333} & +0.098 & -0.322 & -0.652 & -5.261 & --\\
-p1\_ns\_rho0p7\_sy1\_d8\_n5k & -0.329 & \textbf{-0.331} & +0.098 & -0.321 & -0.651 & -5.174 & --\\
+p1\_dim\_rho0p7\_sy1\_d128\_n20k & -0.329 & \textbf{-0.050} & +0.140 & -0.295 & -1.852 & -6.133 & --\\
+p1\_dim\_rho0p7\_sy1\_d1\_n20k & -0.329 & \textbf{-0.329} & -0.250 & -0.322 & -0.321 & -0.271 & -0.191\\
+p1\_dim\_rho0p7\_sy1\_d32\_n20k & -0.329 & \textbf{-0.365} & +0.134 & -0.330 & -1.467 & -6.102 & --\\
+p1\_dim\_rhon0p7\_sy1\_d128\_n20k & +0.177 & \textbf{+0.022} & +0.139 & +0.271 & -1.938 & -6.143 & --\\
+p1\_dim\_rhon0p7\_sy1\_d1\_n20k & +0.177 & \textbf{+0.168} & +0.232 & +0.184 & +0.183 & +0.171 & +0.300\\
+p1\_dim\_rhon0p7\_sy1\_d32\_n20k & +0.177 & \textbf{+0.129} & +0.146 & +0.177 & -1.085 & -6.105 & --\\
+p1\_ns\_rho0p7\_sy1\_d8\_n100k & -0.329 & \textbf{-0.332} & +0.089 & -0.321 & -0.704 & -5.204 & --\\
+p1\_ns\_rho0p7\_sy1\_d8\_n1k & -0.329 & \textbf{-0.331} & +0.089 & -0.325 & -0.630 & -5.217 & --\\
+p1\_ns\_rho0p7\_sy1\_d8\_n20k & -0.329 & \textbf{-0.333} & +0.089 & -0.322 & -0.652 & -5.261 & --\\
+p1\_ns\_rho0p7\_sy1\_d8\_n5k & -0.329 & \textbf{-0.331} & +0.089 & -0.321 & -0.651 & -5.174 & --\\
 p1\_ns\_rhon0p7\_sy1\_d8\_n100k & +0.177 & \textbf{+0.157} & +0.149 & +0.180 & -0.648 & -5.374 & --\\
-p1\_ns\_rhon0p7\_sy1\_d8\_n1k & +0.177 & \textbf{+0.160} & +0.148 & +0.183 & -0.497 & -5.338 & --\\
-p1\_ns\_rhon0p7\_sy1\_d8\_n20k & +0.177 & \textbf{+0.154} & +0.148 & +0.180 & -0.602 & -5.375 & --\\
-p1\_ns\_rhon0p7\_sy1\_d8\_n5k & +0.177 & \textbf{+0.154} & +0.148 & +0.185 & -0.453 & -5.449 & --\\
-p2\_independent\_senc0p1 & +0.000 & \textbf{+0.000} & +0.136 & -0.001 & -0.305 & -1.923 & --\\
+p1\_ns\_rhon0p7\_sy1\_d8\_n1k & +0.177 & \textbf{+0.160} & +0.149 & +0.183 & -0.497 & -5.338 & --\\
+p1\_ns\_rhon0p7\_sy1\_d8\_n20k & +0.177 & \textbf{+0.154} & +0.149 & +0.180 & -0.602 & -5.375 & --\\
+p1\_ns\_rhon0p7\_sy1\_d8\_n5k & +0.177 & \textbf{+0.154} & +0.149 & +0.185 & -0.453 & -5.449 & --\\
+p2\_independent\_senc0p1 & +0.000 & \textbf{+0.000} & +0.142 & -0.001 & -0.305 & -1.923 & --\\
 p2\_independent\_senc0p5 & +0.000 & \textbf{+0.000} & +0.141 & -0.000 & -0.763 & -2.083 & --\\
-p2\_independent\_senc1 & +0.000 & \textbf{-0.000} & +0.136 & -0.000 & -0.844 & -2.070 & --\\
-p2\_lambda0\_senc0p1 & -2.079 & \textbf{-6.167} & -2.068 & -2.590 & -2.063 & -2.191 & --\\
-p2\_lambda0\_senc0p5 & -0.730 & \textbf{-0.488} & -0.212 & -0.646 & -1.009 & -2.022 & --\\
+p2\_independent\_senc1 & +0.000 & \textbf{-0.000} & +0.138 & -0.000 & -0.844 & -2.070 & --\\
+p2\_lambda0\_senc0p1 & -2.079 & \textbf{-6.167} & -2.054 & -2.590 & -2.063 & -2.191 & --\\
+p2\_lambda0\_senc0p5 & -0.730 & \textbf{-0.488} & -0.209 & -0.646 & -1.009 & -2.022 & --\\
 p2\_lambda0\_senc1 & -0.065 & \textbf{-0.000} & +0.144 & -0.049 & -0.975 & -2.085 & --\\
-p2\_lambda0p25\_senc0p1 & -0.302 & \textbf{-0.165} & -0.319 & +0.203 & -0.708 & -2.281 & --\\
-p2\_lambda0p25\_senc0p5 & -0.134 & \textbf{-0.137} & +0.031 & -0.223 & -0.760 & -2.062 & --\\
-p2\_lambda0p25\_senc1 & -0.016 & \textbf{+0.001} & +0.142 & -0.018 & -0.780 & -2.037 & --\\
-p2\_lambda0p5\_senc0p1 & +0.814 & \textbf{+1.008} & +0.792 & +1.347 & +0.138 & -2.142 & --\\
-p2\_lambda0p5\_senc0p5 & +0.272 & \textbf{+0.069} & +0.238 & +0.102 & -0.554 & -2.075 & --\\
-p2\_lambda0p5\_senc1 & +0.024 & \textbf{+0.004} & +0.142 & +0.004 & -0.953 & -2.079 & --\\
-p2\_lambda0p75\_senc0p1 & +1.583 & \textbf{+1.720} & +1.557 & +2.062 & +0.630 & -2.063 & --\\
-p2\_lambda0p75\_senc0p5 & +0.545 & \textbf{+0.333} & +0.364 & +0.391 & -0.817 & -2.090 & --\\
-p2\_lambda0p75\_senc1 & +0.048 & \textbf{+0.004} & +0.144 & +0.011 & -0.524 & -2.058 & --\\
-p2\_lambda1\_senc0p1 & +2.079 & \textbf{+2.284} & +2.066 & +2.819 & +0.830 & -2.160 & --\\
-p2\_lambda1\_senc0p5 & +0.733 & \textbf{+0.560} & +0.481 & +0.612 & -0.820 & -2.016 & --\\
-p2\_lambda1\_senc1 & +0.067 & \textbf{+0.000} & +0.146 & -0.001 & -0.796 & -2.101 & --\\
-p2\_redundant\_senc0p1 & -2.079 & \textbf{-5.757} & -2.062 & -3.164 & -2.058 & -2.194 & --\\
-p2\_redundant\_senc0p5 & -0.730 & \textbf{-0.425} & -0.216 & -0.635 & -0.924 & -2.035 & --\\
-p2\_redundant\_senc1 & -0.065 & \textbf{-0.000} & +0.133 & -0.041 & -0.768 & -2.071 & --\\
-p2\_synergy1\_senc0p1 & +2.079 & \textbf{+2.252} & +2.067 & +2.806 & +0.824 & -2.034 & --\\
-p2\_synergy1\_senc0p5 & +0.733 & \textbf{+0.546} & +0.461 & +0.608 & -0.918 & -2.094 & --\\
+p2\_lambda0p25\_senc0p1 & -0.302 & \textbf{-0.165} & -0.327 & +0.203 & -0.708 & -2.281 & --\\
+p2\_lambda0p25\_senc0p5 & -0.134 & \textbf{-0.137} & +0.027 & -0.223 & -0.760 & -2.062 & --\\
+p2\_lambda0p25\_senc1 & -0.016 & \textbf{+0.001} & +0.143 & -0.018 & -0.780 & -2.037 & --\\
+p2\_lambda0p5\_senc0p1 & +0.814 & \textbf{+1.008} & +0.794 & +1.347 & +0.138 & -2.142 & --\\
+p2\_lambda0p5\_senc0p5 & +0.272 & \textbf{+0.069} & +0.232 & +0.102 & -0.554 & -2.075 & --\\
+p2\_lambda0p5\_senc1 & +0.024 & \textbf{+0.004} & +0.144 & +0.004 & -0.953 & -2.079 & --\\
+p2\_lambda0p75\_senc0p1 & +1.583 & \textbf{+1.720} & +1.556 & +2.062 & +0.630 & -2.063 & --\\
+p2\_lambda0p75\_senc0p5 & +0.545 & \textbf{+0.333} & +0.376 & +0.391 & -0.817 & -2.090 & --\\
+p2\_lambda0p75\_senc1 & +0.048 & \textbf{+0.004} & +0.143 & +0.011 & -0.524 & -2.058 & --\\
+p2\_lambda1\_senc0p1 & +2.079 & \textbf{+2.284} & +2.066 & +2.826 & +0.830 & -2.160 & --\\
+p2\_lambda1\_senc0p5 & +0.733 & \textbf{+0.560} & +0.477 & +0.608 & -0.820 & -2.016 & --\\
+p2\_lambda1\_senc1 & +0.067 & \textbf{+0.000} & +0.145 & -0.000 & -0.796 & -2.101 & --\\
+p2\_redundant\_senc0p1 & -2.079 & \textbf{-5.757} & -2.052 & -3.164 & -2.058 & -2.194 & --\\
+p2\_redundant\_senc0p5 & -0.730 & \textbf{-0.425} & -0.207 & -0.635 & -0.924 & -2.035 & --\\
+p2\_redundant\_senc1 & -0.065 & \textbf{-0.000} & +0.134 & -0.041 & -0.768 & -2.071 & --\\
+p2\_synergy1\_senc0p1 & +2.079 & \textbf{+2.252} & +2.066 & +2.806 & +0.824 & -2.034 & --\\
+p2\_synergy1\_senc0p5 & +0.733 & \textbf{+0.546} & +0.482 & +0.608 & -0.918 & -2.094 & --\\
 p2\_synergy1\_senc1 & +0.067 & \textbf{-0.000} & +0.145 & -0.000 & -1.015 & -2.055 & --\\
-p2\_synergy2\_senc0p1 & +2.079 & \textbf{+0.000} & +0.719 & -0.001 & +0.623 & -1.968 & --\\
-p2\_synergy2\_senc0p5 & +0.424 & \textbf{-0.000} & +0.148 & -0.000 & -0.870 & -2.084 & --\\
-p2\_synergy2\_senc1 & +0.010 & \textbf{+0.000} & +0.146 & +0.000 & -0.748 & -2.064 & --\\
-p2\_unique\_senc0p1 & -0.000 & \textbf{-0.000} & +0.007 & +0.009 & -0.838 & -2.042 & --\\
+p2\_synergy2\_senc0p1 & +2.079 & \textbf{+0.000} & +0.718 & -0.001 & +0.623 & -1.968 & --\\
+p2\_synergy2\_senc0p5 & +0.424 & \textbf{-0.000} & +0.152 & -0.000 & -0.870 & -2.084 & --\\
+p2\_synergy2\_senc1 & +0.010 & \textbf{+0.000} & +0.142 & +0.000 & -0.748 & -2.064 & --\\
+p2\_unique\_senc0p1 & -0.000 & \textbf{-0.000} & +0.000 & +0.009 & -0.838 & -2.042 & --\\
 \bottomrule\end{longtable}
 \end{document}

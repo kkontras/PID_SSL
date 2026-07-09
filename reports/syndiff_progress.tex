@@ -3,19 +3,19 @@
 \usepackage{longtable}
 \begin{document}
 \begin{center}{\Large\textbf{SynDiff Synthetic Benchmark — Live Progress}}\\[4pt]
-2026-07-09 18:31:16 CEST\\[2pt]
-\textbf{132/942} jobs complete (14.0\%)\end{center}
+2026-07-09 19:01:19 CEST\\[2pt]
+\textbf{189/942} jobs complete (20.1\%)\end{center}
 \vspace{6pt}
 S $=$ I(X$_1$;Y$|$X$_2$) $-$ I(X$_1$;Y) in nats; S$>$0 synergy-dominant, S$<$0 redundancy-dominant. SynDiff (ours) vs prior estimators.
 \section*{Sweep progress}
 \begin{tabular}{llrr}\toprule Phase & Method & Done & Expected\\\midrule
 P1 & batch\_pid & 0 & 96\\
 P1 & broja & 0 & 6\\
-P1 & infonce & 33 & 96\\
-P1 & minde\_comp & 30 & 96\\
-P1 & mine & 33 & 96\\
+P1 & infonce & 48 & 96\\
+P1 & minde\_comp & 44 & 96\\
+P1 & mine & 48 & 96\\
 P1 & plugin & 2 & 6\\
-P1 & syndiff & 34 & 96\\
+P1 & syndiff & 47 & 96\\
 P2 & batch\_pid & 0 & 90\\
 P2 & infonce & 0 & 90\\
 P2 & minde\_comp & 0 & 90\\
@@ -24,18 +24,22 @@ P2 & syndiff & 0 & 90\\
 \bottomrule\end{tabular}
 \section*{Accuracy vs ground truth (completed cells, lower error better)}
 \begin{tabular}{lrrr}\toprule Method & \#cells & mean $|$est$-$truth$|$ & sign acc\\\midrule
-minde\_comp & 11 & 0.0224 & 1.00\\
-\textbf{syndiff} & 12 & \textbf{0.0412} & 1.00\\
+minde\_comp & 15 & 0.0251 & 1.00\\
+\textbf{syndiff} & 16 & \textbf{0.0398} & 1.00\\
 plugin & 2 & 0.1343 & 1.00\\
-mine & 11 & 0.9896 & 0.55\\
-infonce & 11 & 6.4980 & 0.00\\
+mine & 16 & 0.8870 & 0.62\\
+infonce & 16 & 6.2649 & 0.12\\
 \bottomrule\end{tabular}
 \section*{SynDiff vs prior — head to head (nats)}
 \footnotesize\begin{longtable}{lrrrrrrr}\toprule Cell & truth & \textbf{SynDiff} & batch\_pid & minde\_comp & mine & infonce & plugin\\\midrule\endhead
 p1\_dial\_rho0\_sy0p1\_d8\_n20k & +1.963 & \textbf{+1.887} & -- & +1.922 & +0.631 & -5.604 & --\\
-p1\_dial\_rho0\_sy1\_d8\_n20k & +0.144 & \textbf{+0.136} & -- & +0.146 & -0.555 & -5.315 & --\\
-p1\_dial\_rho0p3\_sy0p1\_d8\_n20k & +1.740 & \textbf{+1.677} & -- & +1.695 & +0.627 & -5.460 & --\\
-p1\_dial\_rho0p3\_sy1\_d8\_n20k & +0.007 & \textbf{+0.006} & -- & -- & -- & -- & --\\
+p1\_dial\_rho0\_sy1\_d8\_n20k & +0.144 & \textbf{+0.136} & -- & +0.145 & -0.555 & -5.315 & --\\
+p1\_dial\_rho0p3\_sy0p1\_d8\_n20k & +1.740 & \textbf{+1.677} & -- & +1.678 & +0.627 & -5.460 & --\\
+p1\_dial\_rho0p3\_sy1\_d8\_n20k & +0.007 & \textbf{+0.006} & -- & +0.010 & -0.603 & -5.429 & --\\
+p1\_dial\_rho0p5\_sy0p1\_d8\_n20k & +1.477 & \textbf{+1.407} & -- & +1.434 & +0.525 & -5.436 & --\\
+p1\_dial\_rho0p5\_sy1\_d8\_n20k & -0.134 & \textbf{-0.134} & -- & -0.128 & -0.829 & -5.254 & --\\
+p1\_dial\_rho0p7\_sy0p1\_d8\_n20k & +1.035 & \textbf{+0.971} & -- & +0.974 & +0.309 & -5.395 & --\\
+p1\_dial\_rho0p7\_sy1\_d8\_n20k & -0.329 & \textbf{-0.335} & -- & -- & -0.651 & -5.190 & --\\
 p1\_dial\_rhon0p3\_sy0p1\_d8\_n20k & +2.047 & \textbf{+1.976} & -- & +2.017 & +0.724 & -5.385 & --\\
 p1\_dial\_rhon0p3\_sy1\_d8\_n20k & +0.209 & \textbf{+0.199} & -- & +0.210 & -0.562 & -5.363 & --\\
 p1\_dial\_rhon0p5\_sy0p1\_d8\_n20k & +2.023 & \textbf{+1.953} & -- & +1.980 & +0.795 & -5.507 & --\\
